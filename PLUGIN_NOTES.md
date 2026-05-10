@@ -17,6 +17,7 @@ Roadmap below.
 | 3 | layout: tables · child windows · tabs · docking · hand-rolled splitter | implemented |
 | 4 | textures (PNG/JPG/BMP/TGA via stb_image) · `Image` widget · TTF fonts · clipboard | implemented |
 | 5 | audio (fire-and-forget WAV via SDL3 audio streams) · gamepad polling+events · rumble | implemented |
+| 6 | closable windows · popups (open/begin/modal/contextItem/contextWindow) · styles (theme switch + name-keyed push/pop color/var) | implemented |
 
 Each phase adds ~20–30 native functions and the corresponding mType wrapper
 methods. Phases are independent — Phase 2 can land before Phase 3 etc.
@@ -46,6 +47,12 @@ methods. Phases are independent — Phase 2 can land before Phase 3 etc.
 - **Audio (minimal v1)**: `Audio::init()` initialises `SDL_INIT_AUDIO`. `Audio::playWav(path)` decodes a WAV via `SDL_LoadWAV`, opens a default playback device with `SDL_OpenAudioDeviceStream`, queues + flushes the buffer, and resumes the stream. The stream + buffer are intentionally leaked (SDL drains on its own thread). For looping / mp3 / ogg / mixing, vendor SDL_mixer in a future phase and add a richer API.
 - **Gamepad**: `Gamepads::init()` initialises `SDL_INIT_GAMEPAD`. `Gamepads::count()` returns the connected count via `SDL_GetGamepads`. `Gamepads::open(idx)` opens the Nth gamepad and returns a `Gamepad` wrapper. `Gamepad::axis(axisId)` reads an axis (-32768..32767), `Gamepad::button(btnId)` reads a button (bool). Axis/button id constants are documented inline in `Sdl.mt`. Event-type constants exposed: `gamepadButtonDownEventId`, `gamepadButtonUpEventId`, `gamepadAxisMotionEventId`.
 - **Haptic**: `Gamepad::rumble(low, high, durationMs)` wraps `SDL_RumbleGamepad` (low/high motor strengths in [0, 65535]). The lower-level `SDL_Haptic` API is deferred.
+
+**Phase 6 detail** (added 2026-05):
+
+- **Closable windows**: `ImGui::beginClosable(title, currentOpen)` returns `bool[2]` — `[shouldDraw, newOpen]`. The X close button on the title bar flips `newOpen` to false on the click frame. Always call `end()` regardless of `shouldDraw`. Same `bool[2]` shape as `beginPopupModal`.
+- **Popups**: `openPopup(id)` / `beginPopup(id)` for the standard non-modal pattern; `beginPopupModal(title, currentOpen)` (returns `bool[2]`) for blocking modals; `beginPopupContextItem(id)` / `beginPopupContextWindow(id)` for right-click context menus (auto-trigger, no `openPopup` needed). All terminate with `endPopup()`. `closeCurrentPopup()` dismisses from inside.
+- **Styles**: `styleDark()` / `styleLight()` / `styleClassic()` switch the entire palette. `pushStyleColor(name, r, g, b, a)` / `popStyleColor(count)` for per-section color overrides. `pushStyleVarFloat(name, value)` and `pushStyleVarVec2(name, x, y)` plus `popStyleVar(count)` for sizing. **Names are strings, not ints** — the plugin maps "Button"/"WindowBg"/"FrameRounding" etc. via `resolveColorIdx`/`resolveStyleVarIdx` in `ImGuiBindings.cpp`. Unknown names raise `ImGuiError`. The full set of supported names is listed in the file header comment for the relevant resolver functions.
 
 ## Vendoring
 

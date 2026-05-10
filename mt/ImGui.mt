@@ -60,6 +60,23 @@ class ImGui {
         __native__imgui_end();
     }
 
+    // Top-level window WITH the X close button. Returns bool[2]:
+    //   ret[0] = shouldDraw  (true if Begin's body should run; false when
+    //                         the window is collapsed/clipped — but still
+    //                         call end() either way)
+    //   ret[1] = newOpen     (false on the frame the user clicks X)
+    //
+    // Pattern:
+    //   if (myWindowOpen) {
+    //     bool[] s = ImGui::beginClosable("Title", myWindowOpen);
+    //     if (s[0]) { ... widgets ... }
+    //     ImGui::end();
+    //     myWindowOpen = s[1];
+    //   }
+    public static function beginClosable(string title, bool currentOpen): bool[] {
+        return __native__imgui_begin_closable(title, currentOpen);
+    }
+
     public static function text(string label): void {
         __native__imgui_text(label);
     }
@@ -213,6 +230,71 @@ class ImGui {
         __native__imgui_push_font(font.handle);
     }
     public static function popFont(): void { __native__imgui_pop_font(); }
+
+    // ------------------------------------------------------------------
+    // Phase 6 — popups.
+    //
+    // Two-step trigger pattern:
+    //   if (ImGui::button("Open")) { ImGui::openPopup("##my_popup"); }
+    //   if (ImGui::beginPopup("##my_popup")) {
+    //       ImGui::text("hello");
+    //       if (ImGui::button("Close")) { ImGui::closeCurrentPopup(); }
+    //       ImGui::endPopup();
+    //   }
+    //
+    // Modal popups support an X close button — same bool[2] convention as
+    // beginClosable: ret[0] = shouldDraw, ret[1] = newOpen.
+    //
+    // Context popups auto-trigger on right-click (no openPopup needed).
+    // ------------------------------------------------------------------
+
+    public static function openPopup(string id): void { __native__imgui_open_popup(id); }
+    public static function beginPopup(string id): bool {
+        return __native__imgui_begin_popup(id);
+    }
+    public static function beginPopupModal(string title, bool currentOpen): bool[] {
+        return __native__imgui_begin_popup_modal(title, currentOpen);
+    }
+    public static function beginPopupContextItem(string id): bool {
+        return __native__imgui_begin_popup_context_item(id);
+    }
+    public static function beginPopupContextWindow(string id): bool {
+        return __native__imgui_begin_popup_context_window(id);
+    }
+    public static function endPopup(): void { __native__imgui_end_popup(); }
+    public static function closeCurrentPopup(): void { __native__imgui_close_current_popup(); }
+
+    // ------------------------------------------------------------------
+    // Phase 6 — styles.
+    //
+    // Theme switches (dark / light / classic) reset every color at once.
+    // Per-section overrides use push/pop with names like "Button" or
+    // "WindowBg" — keyed by name so .mt code doesn't have to track ImGui's
+    // enum re-numberings between versions. See PLUGIN_NOTES.md for the
+    // full name list, or check src/ImGuiBindings.cpp's resolveColorIdx.
+    //
+    // Each push must be balanced by a matching pop with the right count.
+    // ------------------------------------------------------------------
+
+    public static function styleDark():    void { __native__imgui_style_dark(); }
+    public static function styleLight():   void { __native__imgui_style_light(); }
+    public static function styleClassic(): void { __native__imgui_style_classic(); }
+
+    public static function pushStyleColor(string name, float r, float g, float b, float a): void {
+        __native__imgui_push_style_color(name, r, g, b, a);
+    }
+    public static function popStyleColor(int count): void {
+        __native__imgui_pop_style_color(count);
+    }
+    public static function pushStyleVarFloat(string name, float value): void {
+        __native__imgui_push_style_var_float(name, value);
+    }
+    public static function pushStyleVarVec2(string name, float x, float y): void {
+        __native__imgui_push_style_var_vec2(name, x, y);
+    }
+    public static function popStyleVar(int count): void {
+        __native__imgui_pop_style_var(count);
+    }
 }
 
 class Font {

@@ -154,10 +154,288 @@ namespace sdlimgui
             return g_host->makeBool(ctx, ImGui::Begin(name) ? 1 : 0);
         }
 
+        /* Closable window: ImGui::Begin(label, &p_open) — adds the X close
+         * button to the title bar. The C ABI can't pass a bool reference,
+         * so we fold the in/out into a 2-element bool array:
+         *
+         *   ret[0] = shouldDraw  (Begin's own return — false when window is
+         *                         collapsed; caller skips inner widgets)
+         *   ret[1] = newOpen     (false when user clicked the X this frame)
+         *
+         * Caller pattern (always call End regardless of shouldDraw):
+         *
+         *   bool[] s = ImGui::beginClosable("Title", windowOpen);
+         *   if (s[0]) { ... widgets ... }
+         *   ImGui::end();
+         *   windowOpen = s[1];
+         */
+        MTypeValue* nImGuiBeginClosable(void*, MTypeContext* ctx,
+                                          const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_begin_closable")) {
+                return g_host->makeNull(ctx);
+            }
+            const char* name = getStr(args[0]);
+            bool open = g_host->getBool(args[1]) != 0;
+            bool shouldDraw = ImGui::Begin(name, &open);
+
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_BOOL, 2);
+            g_host->arraySet(out, 0, g_host->makeBool(ctx, shouldDraw ? 1 : 0));
+            g_host->arraySet(out, 1, g_host->makeBool(ctx, open ? 1 : 0));
+            return out;
+        }
+
         MTypeValue* nImGuiEnd(void*, MTypeContext* ctx,
                                const MTypeValue* const*, int)
         {
             ImGui::End();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 6: Popups.
+         *
+         * Two-step pattern: trigger with openPopup(id), then on EVERY frame
+         * call beginPopup(id) — it returns true while the popup is open.
+         *
+         *   if (ImGui::button("Open")) ImGui::openPopup("##my_popup");
+         *   if (ImGui::beginPopup("##my_popup")) {
+         *       ImGui::text("hello"); if (ImGui::button("Close")) ImGui::closeCurrentPopup();
+         *       ImGui::endPopup();
+         *   }
+         *
+         * Modal popups (beginPopupModal) block input behind them and
+         * support the X close button — same bool[2] [shouldDraw, newOpen]
+         * pattern as beginClosable.
+         *
+         * Context-menu popups (beginPopupContextItem / Window) auto-trigger
+         * on a right-click of the previous item / window background, so no
+         * matching openPopup() is required.
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiOpenPopup(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_open_popup")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::OpenPopup(getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBeginPopup(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_popup")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginPopup(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiBeginPopupModal(void*, MTypeContext* ctx,
+                                            const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_begin_popup_modal")) {
+                return g_host->makeNull(ctx);
+            }
+            const char* name = getStr(args[0]);
+            bool open = g_host->getBool(args[1]) != 0;
+            bool shouldDraw = ImGui::BeginPopupModal(name, &open);
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_BOOL, 2);
+            g_host->arraySet(out, 0, g_host->makeBool(ctx, shouldDraw ? 1 : 0));
+            g_host->arraySet(out, 1, g_host->makeBool(ctx, open ? 1 : 0));
+            return out;
+        }
+        MTypeValue* nImGuiBeginPopupContextItem(void*, MTypeContext* ctx,
+                                                  const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_popup_context_item")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginPopupContextItem(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiBeginPopupContextWindow(void*, MTypeContext* ctx,
+                                                    const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_popup_context_window")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginPopupContextWindow(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndPopup(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndPopup();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiCloseCurrentPopup(void*, MTypeContext* ctx,
+                                              const MTypeValue* const*, int)
+        {
+            ImGui::CloseCurrentPopup();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 6: Styles.
+         *
+         * Theme switches are direct calls. Per-section overrides use
+         * push/pop, with the index referenced by NAME so .mt code doesn't
+         * have to track ImGui's enum re-numberings between versions.
+         *
+         * Color names: "Text", "WindowBg", "ChildBg", "PopupBg", "Border",
+         *   "FrameBg", "FrameBgHovered", "FrameBgActive", "TitleBg",
+         *   "TitleBgActive", "MenuBarBg", "ScrollbarBg", "CheckMark",
+         *   "SliderGrab", "SliderGrabActive", "Button", "ButtonHovered",
+         *   "ButtonActive", "Header", "HeaderHovered", "HeaderActive",
+         *   "Separator", "Tab", "TabHovered", "TabActive", "DockingPreview".
+         *
+         * StyleVar (float) names: "Alpha", "DisabledAlpha", "WindowRounding",
+         *   "WindowBorderSize", "ChildRounding", "ChildBorderSize",
+         *   "PopupRounding", "PopupBorderSize", "FrameRounding",
+         *   "FrameBorderSize", "IndentSpacing", "ScrollbarSize",
+         *   "ScrollbarRounding", "GrabMinSize", "GrabRounding", "TabRounding".
+         *
+         * StyleVar (vec2) names: "WindowPadding", "WindowMinSize",
+         *   "WindowTitleAlign", "FramePadding", "ItemSpacing",
+         *   "ItemInnerSpacing", "CellPadding", "ButtonTextAlign",
+         *   "SelectableTextAlign".
+         *
+         * Unknown names raise ImGuiError so typos surface immediately.
+         * ---------------------------------------------------------------- */
+
+        ImGuiCol resolveColorIdx(const char* name)
+        {
+            #define M(N) if (std::strcmp(name, #N) == 0) return ImGuiCol_##N
+            M(Text); M(TextDisabled); M(WindowBg); M(ChildBg); M(PopupBg);
+            M(Border); M(BorderShadow); M(FrameBg); M(FrameBgHovered);
+            M(FrameBgActive); M(TitleBg); M(TitleBgActive); M(TitleBgCollapsed);
+            M(MenuBarBg); M(ScrollbarBg); M(ScrollbarGrab); M(ScrollbarGrabHovered);
+            M(ScrollbarGrabActive); M(CheckMark); M(SliderGrab); M(SliderGrabActive);
+            M(Button); M(ButtonHovered); M(ButtonActive);
+            M(Header); M(HeaderHovered); M(HeaderActive);
+            M(Separator); M(SeparatorHovered); M(SeparatorActive);
+            M(ResizeGrip); M(ResizeGripHovered); M(ResizeGripActive);
+            M(Tab); M(TabHovered); M(TabSelected); M(TabSelectedOverline);
+            M(TabDimmed); M(TabDimmedSelected); M(TabDimmedSelectedOverline);
+            M(DockingPreview); M(DockingEmptyBg);
+            M(PlotLines); M(PlotLinesHovered); M(PlotHistogram); M(PlotHistogramHovered);
+            M(TableHeaderBg); M(TableBorderStrong); M(TableBorderLight);
+            M(TableRowBg); M(TableRowBgAlt);
+            M(TextSelectedBg); M(DragDropTarget);
+            M(NavCursor); M(NavWindowingHighlight); M(NavWindowingDimBg);
+            M(ModalWindowDimBg);
+            #undef M
+            return static_cast<ImGuiCol>(-1);
+        }
+
+        ImGuiStyleVar resolveStyleVarIdx(const char* name)
+        {
+            #define M(N) if (std::strcmp(name, #N) == 0) return ImGuiStyleVar_##N
+            M(Alpha); M(DisabledAlpha);
+            M(WindowPadding); M(WindowRounding); M(WindowBorderSize);
+            M(WindowMinSize); M(WindowTitleAlign);
+            M(ChildRounding); M(ChildBorderSize);
+            M(PopupRounding); M(PopupBorderSize);
+            M(FramePadding); M(FrameRounding); M(FrameBorderSize);
+            M(ItemSpacing); M(ItemInnerSpacing);
+            M(IndentSpacing); M(CellPadding);
+            M(ScrollbarSize); M(ScrollbarRounding);
+            M(GrabMinSize); M(GrabRounding);
+            M(TabRounding); M(TabBorderSize);
+            M(ButtonTextAlign); M(SelectableTextAlign);
+            M(SeparatorTextBorderSize); M(SeparatorTextAlign); M(SeparatorTextPadding);
+            #undef M
+            return static_cast<ImGuiStyleVar>(-1);
+        }
+
+        MTypeValue* nImGuiStyleDark(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::StyleColorsDark();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiStyleLight(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::StyleColorsLight();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiStyleClassic(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::StyleColorsClassic();
+            return g_host->makeVoid(ctx);
+        }
+
+        MTypeValue* nImGuiPushStyleColor(void*, MTypeContext* ctx,
+                                           const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__imgui_push_style_color")) {
+                return g_host->makeVoid(ctx);
+            }
+            const char* name = getStr(args[0]);
+            ImGuiCol idx = resolveColorIdx(name);
+            if (static_cast<int>(idx) < 0) {
+                std::string m = std::string("__native__imgui_push_style_color: unknown color '")
+                              + name + "'";
+                g_host->raiseError(ctx, "ImGuiError", m.c_str());
+                return g_host->makeVoid(ctx);
+            }
+            ImVec4 c(static_cast<float>(g_host->getFloat(args[1])),
+                     static_cast<float>(g_host->getFloat(args[2])),
+                     static_cast<float>(g_host->getFloat(args[3])),
+                     static_cast<float>(g_host->getFloat(args[4])));
+            ImGui::PushStyleColor(idx, c);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPopStyleColor(void*, MTypeContext* ctx,
+                                          const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_pop_style_color")) {
+                return g_host->makeVoid(ctx);
+            }
+            int count = static_cast<int>(g_host->getInt(args[0]));
+            ImGui::PopStyleColor(count);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPushStyleVarFloat(void*, MTypeContext* ctx,
+                                              const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_push_style_var_float")) {
+                return g_host->makeVoid(ctx);
+            }
+            const char* name = getStr(args[0]);
+            ImGuiStyleVar idx = resolveStyleVarIdx(name);
+            if (static_cast<int>(idx) < 0) {
+                std::string m = std::string("__native__imgui_push_style_var_float: unknown var '")
+                              + name + "'";
+                g_host->raiseError(ctx, "ImGuiError", m.c_str());
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::PushStyleVar(idx, static_cast<float>(g_host->getFloat(args[1])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPushStyleVarVec2(void*, MTypeContext* ctx,
+                                             const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_push_style_var_vec2")) {
+                return g_host->makeVoid(ctx);
+            }
+            const char* name = getStr(args[0]);
+            ImGuiStyleVar idx = resolveStyleVarIdx(name);
+            if (static_cast<int>(idx) < 0) {
+                std::string m = std::string("__native__imgui_push_style_var_vec2: unknown var '")
+                              + name + "'";
+                g_host->raiseError(ctx, "ImGuiError", m.c_str());
+                return g_host->makeVoid(ctx);
+            }
+            ImVec2 v(static_cast<float>(g_host->getFloat(args[1])),
+                     static_cast<float>(g_host->getFloat(args[2])));
+            ImGui::PushStyleVar(idx, v);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPopStyleVar(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_pop_style_var")) {
+                return g_host->makeVoid(ctx);
+            }
+            int count = static_cast<int>(g_host->getInt(args[0]));
+            ImGui::PopStyleVar(count);
             return g_host->makeVoid(ctx);
         }
 
@@ -682,6 +960,7 @@ namespace sdlimgui
         reg("__native__imgui_new_frame",               &nImGuiNewFrame);
         reg("__native__imgui_render",                  &nImGuiRender);
         reg("__native__imgui_begin",                   &nImGuiBegin);
+        reg("__native__imgui_begin_closable",          &nImGuiBeginClosable);
         reg("__native__imgui_end",                     &nImGuiEnd);
         reg("__native__imgui_text",                    &nImGuiText);
         reg("__native__imgui_button",                  &nImGuiButton);
@@ -735,5 +1014,24 @@ namespace sdlimgui
         reg("__native__imgui_add_font_from_file",      &nImGuiAddFontFromFile);
         reg("__native__imgui_push_font",               &nImGuiPushFont);
         reg("__native__imgui_pop_font",                &nImGuiPopFont);
+
+        /* Phase 6 — popups */
+        reg("__native__imgui_open_popup",                  &nImGuiOpenPopup);
+        reg("__native__imgui_begin_popup",                 &nImGuiBeginPopup);
+        reg("__native__imgui_begin_popup_modal",           &nImGuiBeginPopupModal);
+        reg("__native__imgui_begin_popup_context_item",    &nImGuiBeginPopupContextItem);
+        reg("__native__imgui_begin_popup_context_window",  &nImGuiBeginPopupContextWindow);
+        reg("__native__imgui_end_popup",                   &nImGuiEndPopup);
+        reg("__native__imgui_close_current_popup",         &nImGuiCloseCurrentPopup);
+
+        /* Phase 6 — styles */
+        reg("__native__imgui_style_dark",                  &nImGuiStyleDark);
+        reg("__native__imgui_style_light",                 &nImGuiStyleLight);
+        reg("__native__imgui_style_classic",               &nImGuiStyleClassic);
+        reg("__native__imgui_push_style_color",            &nImGuiPushStyleColor);
+        reg("__native__imgui_pop_style_color",             &nImGuiPopStyleColor);
+        reg("__native__imgui_push_style_var_float",        &nImGuiPushStyleVarFloat);
+        reg("__native__imgui_push_style_var_vec2",         &nImGuiPushStyleVarVec2);
+        reg("__native__imgui_pop_style_var",               &nImGuiPopStyleVar);
     }
 }
