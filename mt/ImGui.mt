@@ -68,4 +68,59 @@ class ImGui {
     public static function button(string label): bool {
         return __native__imgui_button(label);
     }
+
+    // ------------------------------------------------------------------
+    // Phase 2 — input widgets.
+    //
+    // Widgets that mutate a value follow the same pattern: pass the
+    // current value, the call returns the (possibly modified) new value.
+    // To detect "did the user touch this widget THIS frame" (and not
+    // just "current != previous"), call ImGui.widgetChanged() after the
+    // widget call — it's true on the frame the widget mutated its value.
+    // ------------------------------------------------------------------
+
+    public static function widgetChanged(): bool {
+        return __native__imgui_widget_changed();
+    }
+
+    public static function sliderFloat(string label, float current, float min, float max): float {
+        return __native__imgui_slider_float(label, current, min, max);
+    }
+
+    public static function sliderInt(string label, int current, int min, int max): int {
+        return __native__imgui_slider_int(label, current, min, max);
+    }
+
+    public static function checkbox(string label, bool current): bool {
+        return __native__imgui_checkbox(label, current);
+    }
+
+    // Combo dropdown. items is a string[] of options.
+    // Returns the new selected index (== currentIdx if unchanged).
+    public static function combo(string label, int currentIdx, string[] items): int {
+        return __native__imgui_combo(label, currentIdx, items);
+    }
+
+    // Single-line text edit. maxCapacity is the buffer size the plugin
+    // allocates (clamped to [256, 65536] internally). Returns the
+    // current contents — equal to `current` on frames the user didn't
+    // edit.
+    public static function inputText(string label, string current, int maxCapacity): string {
+        return __native__imgui_input_text(label, current, maxCapacity);
+    }
+
+    // RGB color edit. Each component is in [0,1]. Returns a new
+    // float[3] — index 0=R, 1=G, 2=B.
+    public static function colorEdit3(string label, float r, float g, float b): float[] {
+        return __native__imgui_color_edit3(label, r, g, b);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 2 — layout helpers.
+    // ------------------------------------------------------------------
+
+    public static function sameLine():  void { __native__imgui_same_line(); }
+    public static function separator(): void { __native__imgui_separator(); }
+    public static function spacing():   void { __native__imgui_spacing(); }
+    public static function bulletText(string s): void { __native__imgui_bullet_text(s); }
 }

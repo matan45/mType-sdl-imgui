@@ -81,4 +81,36 @@ class Sdl {
     public static function delay(int millis): void {
         __native__sdl_delay(millis);
     }
+
+    // Phase 2 — event-type id constants. Compare against pollEvent()'s return.
+    public static function mouseMotionEventId():     int { return __native__sdl_event_mouse_motion_id(); }
+    public static function mouseButtonDownEventId(): int { return __native__sdl_event_mouse_button_down_id(); }
+    public static function mouseButtonUpEventId():   int { return __native__sdl_event_mouse_button_up_id(); }
+    public static function mouseWheelEventId():      int { return __native__sdl_event_mouse_wheel_id(); }
+    public static function keyDownEventId():         int { return __native__sdl_event_key_down_id(); }
+    public static function keyUpEventId():           int { return __native__sdl_event_key_up_id(); }
+    public static function textInputEventId():       int { return __native__sdl_event_text_input_id(); }
+}
+
+// Read accessors for the most recently polled event. Each accessor returns
+// 0 / "" when the last event isn't of the matching type — gate on the
+// event-type id constant from Sdl first.
+class Event {
+    // Mouse — valid for motion / button / wheel events as noted.
+    public static function mouseX():         float  { return __native__sdl_event_mouse_x(); }
+    public static function mouseY():         float  { return __native__sdl_event_mouse_y(); }
+    public static function mouseButton():    int    { return __native__sdl_event_mouse_button(); }
+    public static function mouseClicks():    int    { return __native__sdl_event_mouse_clicks(); }
+    public static function wheelY():         float  { return __native__sdl_event_wheel_y(); }
+
+    // Key — valid for key down/up events.
+    // scancode: layout-independent (SDL_SCANCODE_*).
+    // keycode:  layout-dependent character (SDL_KEYCODE_*).
+    public static function keyScancode():    int    { return __native__sdl_event_key_scancode(); }
+    public static function keyKeycode():     int    { return __native__sdl_event_key_keycode(); }
+    public static function keyMod():         int    { return __native__sdl_event_key_mod(); }
+    public static function keyRepeat():      bool   { return __native__sdl_event_key_repeat(); }
+
+    // Text — valid for text input events.
+    public static function text():           string { return __native__sdl_event_text(); }
 }

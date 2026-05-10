@@ -21,9 +21,11 @@
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_sdlrenderer3.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace sdlimgui
 {
@@ -175,6 +177,177 @@ namespace sdlimgui
             const char* label = getStr(args[0]);
             return g_host->makeBool(ctx, ImGui::Button(label) ? 1 : 0);
         }
+
+        /* ----------------------------------------------------------------
+         * Phase 2: input widgets. The C ABI can't pass C++ references, so
+         * the in/out pattern from native ImGui is folded into:
+         *
+         *   in:  the current value (caller's copy)
+         *   out: the new value (== current if widget did not mutate)
+         *
+         * Whether the widget actually changed this frame is recorded in
+         * g_lastWidgetChanged and surfaced via __native__imgui_widget_changed.
+         * Both pieces are needed: returned-value comparison can't tell when
+         * a slider was dragged back to its starting value within one frame.
+         * ---------------------------------------------------------------- */
+
+        bool g_lastWidgetChanged = false;
+
+        MTypeValue* nImGuiWidgetChanged(void*, MTypeContext* ctx,
+                                          const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, g_lastWidgetChanged ? 1 : 0);
+        }
+
+        MTypeValue* nImGuiSliderFloat(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__imgui_slider_float")) {
+                return g_host->makeFloat(ctx, 0.0);
+            }
+            const char* label = getStr(args[0]);
+            float v = static_cast<float>(g_host->getFloat(args[1]));
+            float lo = static_cast<float>(g_host->getFloat(args[2]));
+            float hi = static_cast<float>(g_host->getFloat(args[3]));
+            g_lastWidgetChanged = ImGui::SliderFloat(label, &v, lo, hi);
+            return g_host->makeFloat(ctx, static_cast<double>(v));
+        }
+
+        MTypeValue* nImGuiSliderInt(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__imgui_slider_int")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            int v  = static_cast<int>(g_host->getInt(args[1]));
+            int lo = static_cast<int>(g_host->getInt(args[2]));
+            int hi = static_cast<int>(g_host->getInt(args[3]));
+            g_lastWidgetChanged = ImGui::SliderInt(label, &v, lo, hi);
+            return g_host->makeInt(ctx, static_cast<int64_t>(v));
+        }
+
+        MTypeValue* nImGuiCheckbox(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_checkbox")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            bool v = g_host->getBool(args[1]) != 0;
+            g_lastWidgetChanged = ImGui::Checkbox(label, &v);
+            return g_host->makeBool(ctx, v ? 1 : 0);
+        }
+
+        /* Combo accepts items as a string[] mType array. The plugin builds
+         * a single \\0-separated buffer that ImGui's Combo() expects.
+         * Returns the new selected index. */
+        MTypeValue* nImGuiCombo(void*, MTypeContext* ctx,
+                                  const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_combo")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            int currentIdx = static_cast<int>(g_host->getInt(args[1]));
+            const MTypeValue* itemsArr = args[2];
+
+            std::string buf;
+            int count = 0;
+            if (g_host->getTag(itemsArr) == MT_TAG_ARRAY) {
+                size_t n = g_host->arrayLen(itemsArr);
+                count = static_cast<int>(n);
+                for (size_t i = 0; i < n; ++i) {
+                    MTypeValue* el = g_host->arrayGet(ctx, itemsArr, i);
+                    size_t slen = 0;
+                    const char* s = g_host->getString(el, &slen);
+                    buf.append(s, slen);
+                    buf.push_back('\0');
+                }
+                buf.push_back('\0');  /* second null terminates the items list */
+            }
+            g_lastWidgetChanged = ImGui::Combo(label, &currentIdx,
+                                               count > 0 ? buf.c_str() : "\0\0",
+                                               count);
+            return g_host->makeInt(ctx, static_cast<int64_t>(currentIdx));
+        }
+
+        /* InputText. Plugin sizes its temp buffer to max(256, capCap) so
+         * malicious capCap can't blow heap. Returns the modified string. */
+        MTypeValue* nImGuiInputText(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_input_text")) {
+                return g_host->makeString(ctx, "", 0);
+            }
+            const char* label = getStr(args[0]);
+            size_t curLen = 0;
+            const char* curStr = getStr(args[1], &curLen);
+            int requestedCap = static_cast<int>(g_host->getInt(args[2]));
+
+            constexpr size_t kMinCap = 256;
+            constexpr size_t kMaxCap = 1 << 16;  /* 64 KiB hard ceiling */
+            size_t cap = static_cast<size_t>(std::max(0, requestedCap));
+            if (cap < kMinCap) cap = kMinCap;
+            if (cap > kMaxCap) cap = kMaxCap;
+
+            std::vector<char> buf(cap, 0);
+            size_t copy = std::min(curLen, cap - 1);
+            std::memcpy(buf.data(), curStr, copy);
+            buf[copy] = '\0';
+
+            g_lastWidgetChanged = ImGui::InputText(label, buf.data(), cap);
+            return g_host->makeString(ctx, buf.data(), std::strlen(buf.data()));
+        }
+
+        /* ColorEdit3. Returns a 3-element float[] array (r,g,b in [0,1]). */
+        MTypeValue* nImGuiColorEdit3(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__imgui_color_edit3")) {
+                return g_host->makeNull(ctx);
+            }
+            const char* label = getStr(args[0]);
+            float c[3] = {
+                static_cast<float>(g_host->getFloat(args[1])),
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+            };
+            g_lastWidgetChanged = ImGui::ColorEdit3(label, c);
+
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 3);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, c[0]));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, c[1]));
+            g_host->arraySet(out, 2, g_host->makeFloat(ctx, c[2]));
+            return out;
+        }
+
+        /* Layout / formatting helpers. All void-returning. */
+        MTypeValue* nImGuiSameLine(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::SameLine();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiSeparator(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::Separator();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiSpacing(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::Spacing();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBulletText(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_bullet_text")) {
+                return g_host->makeVoid(ctx);
+            }
+            const char* s = getStr(args[0]);
+            ImGui::BulletText("%s", s);
+            return g_host->makeVoid(ctx);
+        }
     }
 
     void registerImGuiNatives(MTypeContext* ctx)
@@ -195,5 +368,20 @@ namespace sdlimgui
         reg("__native__imgui_end",                     &nImGuiEnd);
         reg("__native__imgui_text",                    &nImGuiText);
         reg("__native__imgui_button",                  &nImGuiButton);
+
+        /* Phase 2 — input widgets */
+        reg("__native__imgui_widget_changed",          &nImGuiWidgetChanged);
+        reg("__native__imgui_slider_float",            &nImGuiSliderFloat);
+        reg("__native__imgui_slider_int",              &nImGuiSliderInt);
+        reg("__native__imgui_checkbox",                &nImGuiCheckbox);
+        reg("__native__imgui_combo",                   &nImGuiCombo);
+        reg("__native__imgui_input_text",              &nImGuiInputText);
+        reg("__native__imgui_color_edit3",             &nImGuiColorEdit3);
+
+        /* Phase 2 — layout helpers */
+        reg("__native__imgui_same_line",               &nImGuiSameLine);
+        reg("__native__imgui_separator",               &nImGuiSeparator);
+        reg("__native__imgui_spacing",                 &nImGuiSpacing);
+        reg("__native__imgui_bullet_text",             &nImGuiBulletText);
     }
 }

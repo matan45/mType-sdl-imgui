@@ -8,19 +8,24 @@ the engine. Loaded at runtime by `__plugin_load("./bin/.../mtype_sdl_imgui.dll")
 
 ## Phase status
 
-This is **Phase 1**: enough surface to open a window, drive an event loop,
-draw an `ImGui::Text` and a clickable `ImGui::Button`. Roadmap below.
+Roadmap below.
 
 | Phase | Surface | Status |
 |---|---|---|
 | 1 | init/quit · window · renderer · poll/quit event · ImGui context+backends · `Begin`/`End` · `Text` · `Button` | implemented |
-| 2 | mouse / keyboard / text-input event extraction · slider/checkbox/combo/input · color picker | TODO |
+| 2 | mouse / keyboard / text-input event extraction · slider/checkbox/combo/input · color picker · `SameLine`/`Separator`/`Spacing`/`BulletText` | implemented |
 | 3 | layout: columns · child windows · tabs · docking · splitters | TODO |
 | 4 | textures (load PNG via SDL_image) · `Image` widget · custom fonts · clipboard | TODO |
 | 5 | audio (SDL_mixer or SDL_audio raw) · gamepad / haptic | TODO |
 
 Each phase adds ~20–30 native functions and the corresponding mType wrapper
 methods. Phases are independent — Phase 2 can land before Phase 3 etc.
+
+**Phase 2 detail** (added 2026-05):
+
+- SDL: event-type id constants (`mouseMotionEventId`, `mouseButtonDownEventId`, `mouseButtonUpEventId`, `mouseWheelEventId`, `keyDownEventId`, `keyUpEventId`, `textInputEventId`) plus an `Event` static class with `mouseX`/`mouseY`/`mouseButton`/`mouseClicks`/`wheelY`/`keyScancode`/`keyKeycode`/`keyMod`/`keyRepeat`/`text` payload accessors.
+- ImGui inputs: `sliderFloat`, `sliderInt`, `checkbox`, `combo(label, idx, string[])`, `inputText(label, current, maxCap)`, `colorEdit3` (returns `float[3]`), plus `widgetChanged()` to detect "did the last widget mutate this frame" (separate signal because returned-value comparison can't tell when a slider is dragged back to its starting value within one frame).
+- ImGui layout: `sameLine`, `separator`, `spacing`, `bulletText`.
 
 ## Vendoring
 
