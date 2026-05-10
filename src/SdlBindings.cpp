@@ -21,6 +21,8 @@
 #include "PluginGlobals.hpp"
 
 #include <SDL3/SDL.h>
+#include "stb_image.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -345,6 +347,283 @@ namespace sdlimgui
             }
             return g_host->makeString(ctx, "", 0);
         }
+
+        /* ----------------------------------------------------------------
+         * Phase 4: textures. stb_image loads PNG/JPG/BMP/GIF/PSD/TGA into
+         * RGBA8 pixels; SDL_CreateTexture + SDL_UpdateTexture wraps it as
+         * a renderer texture. Returned handle is the registry id; pass to
+         * ImGui.image() or destroy via __native__sdl_destroy_texture.
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nSdlLoadTexture(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__sdl_load_texture")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            if (!r) {
+                g_host->raiseError(ctx, "SdlError",
+                                   "__native__sdl_load_texture: invalid renderer id");
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* path = getStr(args[1]);
+
+            int w = 0, h = 0, channels = 0;
+            stbi_uc* pixels = stbi_load(path, &w, &h, &channels, STBI_rgb_alpha);
+            if (!pixels) {
+                std::string m = std::string("__native__sdl_load_texture: stbi_load failed for '")
+                              + path + "': " + (stbi_failure_reason() ? stbi_failure_reason() : "unknown");
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeInt(ctx, 0);
+            }
+
+            SDL_Texture* tex = SDL_CreateTexture(r,
+                SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, w, h);
+            if (!tex) {
+                stbi_image_free(pixels);
+                std::string m = std::string("__native__sdl_load_texture: SDL_CreateTexture failed: ")
+                              + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_UpdateTexture(tex, nullptr, pixels, w * 4);
+            SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+            stbi_image_free(pixels);
+
+            return g_host->makeInt(ctx, g_textures.insert(tex));
+        }
+
+        MTypeValue* nSdlDestroyTexture(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_destroy_texture")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Texture* tex = g_textures.erase(g_host->getInt(args[0]));
+            if (tex) SDL_DestroyTexture(tex);
+            return g_host->makeVoid(ctx);
+        }
+
+        MTypeValue* nSdlTextureWidth(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_texture_width")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_Texture* tex = g_textures.find(g_host->getInt(args[0]));
+            if (!tex) return g_host->makeInt(ctx, 0);
+            float w = 0, h = 0;
+            SDL_GetTextureSize(tex, &w, &h);
+            return g_host->makeInt(ctx, static_cast<int64_t>(w));
+        }
+        MTypeValue* nSdlTextureHeight(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_texture_height")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_Texture* tex = g_textures.find(g_host->getInt(args[0]));
+            if (!tex) return g_host->makeInt(ctx, 0);
+            float w = 0, h = 0;
+            SDL_GetTextureSize(tex, &w, &h);
+            return g_host->makeInt(ctx, static_cast<int64_t>(h));
+        }
+
+        /* Helper for ImGuiBindings — takes texture id, returns the
+         * SDL_Texture* (or nullptr). Exposed via PluginGlobals. */
+
+        /* ----------------------------------------------------------------
+         * Phase 5: audio (fire-and-forget WAV playback). SDL3's audio API
+         * is centered around streams; this helper opens a default audio
+         * device, decodes a WAV, queues it once, and lets the device drain
+         * the buffer naturally. Lifetime: device + stream are intentionally
+         * leaked at process exit — fine for a v1 fire-and-forget API. For
+         * looping / mixing / mp3 / ogg, vendor SDL_mixer in a future phase.
+         * ---------------------------------------------------------------- */
+
+        SDL_AudioDeviceID g_audioDevice = 0;
+
+        MTypeValue* nSdlInitAudio(void*, MTypeContext* ctx,
+                                    const MTypeValue* const*, int argc)
+        {
+            if (!requireArgs(ctx, argc, 0, "__native__sdl_init_audio")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+                std::string m = std::string("SDL_InitSubSystem(AUDIO) failed: ") + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, 1);
+        }
+
+        MTypeValue* nSdlPlayWav(void*, MTypeContext* ctx,
+                                  const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_play_wav")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* path = getStr(args[0]);
+
+            SDL_AudioSpec spec{};
+            Uint8* buf = nullptr;
+            Uint32 len = 0;
+            if (!SDL_LoadWAV(path, &spec, &buf, &len)) {
+                std::string m = std::string("__native__sdl_play_wav: SDL_LoadWAV failed: ")
+                              + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeBool(ctx, 0);
+            }
+
+            /* OpenAudioDeviceStream creates both device + stream and starts
+             * paused. Caller must SDL_ResumeAudioStreamDevice to play. */
+            SDL_AudioStream* stream = SDL_OpenAudioDeviceStream(
+                SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+            if (!stream) {
+                SDL_free(buf);
+                std::string m = std::string("__native__sdl_play_wav: OpenAudioDeviceStream failed: ")
+                              + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeBool(ctx, 0);
+            }
+            SDL_PutAudioStreamData(stream, buf, static_cast<int>(len));
+            SDL_FlushAudioStream(stream);
+            SDL_ResumeAudioStreamDevice(stream);
+
+            /* Stream + buf are intentionally leaked: SDL drains the queue
+             * on its own thread. For repeated playback, build a richer API
+             * in a future revision (or vendor SDL_mixer). */
+            return g_host->makeBool(ctx, 1);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 5: gamepads. Polled API (you can also subscribe to the
+         * SDL_EVENT_GAMEPAD_* events; constants below).
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nSdlInitGamepads(void*, MTypeContext* ctx,
+                                       const MTypeValue* const*, int)
+        {
+            if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+                std::string m = std::string("SDL_InitSubSystem(GAMEPAD) failed: ") + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, 1);
+        }
+
+        MTypeValue* nSdlGamepadCount(void*, MTypeContext* ctx,
+                                       const MTypeValue* const*, int)
+        {
+            int count = 0;
+            SDL_JoystickID* ids = SDL_GetGamepads(&count);
+            if (ids) SDL_free(ids);
+            return g_host->makeInt(ctx, static_cast<int64_t>(count));
+        }
+
+        MTypeValue* nSdlOpenGamepad(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_open_gamepad")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            int wantedIdx = static_cast<int>(g_host->getInt(args[0]));
+
+            int count = 0;
+            SDL_JoystickID* ids = SDL_GetGamepads(&count);
+            if (!ids || wantedIdx < 0 || wantedIdx >= count) {
+                if (ids) SDL_free(ids);
+                g_host->raiseError(ctx, "SdlError",
+                                   "__native__sdl_open_gamepad: index out of range");
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_Gamepad* pad = SDL_OpenGamepad(ids[wantedIdx]);
+            SDL_free(ids);
+            if (!pad) {
+                std::string m = std::string("SDL_OpenGamepad failed: ") + SDL_GetError();
+                g_host->raiseError(ctx, "SdlError", m.c_str());
+                return g_host->makeInt(ctx, 0);
+            }
+            return g_host->makeInt(ctx, g_gamepads.insert(pad));
+        }
+
+        MTypeValue* nSdlCloseGamepad(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_close_gamepad")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Gamepad* pad = g_gamepads.erase(g_host->getInt(args[0]));
+            if (pad) SDL_CloseGamepad(pad);
+            return g_host->makeVoid(ctx);
+        }
+
+        MTypeValue* nSdlGamepadAxis(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__sdl_gamepad_axis")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            SDL_Gamepad* pad = g_gamepads.find(g_host->getInt(args[0]));
+            int axisId = static_cast<int>(g_host->getInt(args[1]));
+            if (!pad) return g_host->makeInt(ctx, 0);
+            return g_host->makeInt(ctx,
+                static_cast<int64_t>(SDL_GetGamepadAxis(pad, static_cast<SDL_GamepadAxis>(axisId))));
+        }
+
+        MTypeValue* nSdlGamepadButton(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__sdl_gamepad_button")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            SDL_Gamepad* pad = g_gamepads.find(g_host->getInt(args[0]));
+            int btnId = static_cast<int>(g_host->getInt(args[1]));
+            if (!pad) return g_host->makeBool(ctx, 0);
+            return g_host->makeBool(ctx,
+                SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(btnId)) ? 1 : 0);
+        }
+
+        MTypeValue* nSdlEventGamepadButtonDownId(void*, MTypeContext* ctx,
+                                                    const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_EVENT_GAMEPAD_BUTTON_DOWN));
+        }
+        MTypeValue* nSdlEventGamepadButtonUpId(void*, MTypeContext* ctx,
+                                                  const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_EVENT_GAMEPAD_BUTTON_UP));
+        }
+        MTypeValue* nSdlEventGamepadAxisMotionId(void*, MTypeContext* ctx,
+                                                    const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_EVENT_GAMEPAD_AXIS_MOTION));
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 5: haptic (rumble only). SDL3's high-level rumble works on
+         * any opened gamepad that supports it; the lower-level SDL_Haptic
+         * API is deferred.
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nSdlRumbleGamepad(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__sdl_rumble_gamepad")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            SDL_Gamepad* pad = g_gamepads.find(g_host->getInt(args[0]));
+            if (!pad) return g_host->makeBool(ctx, 0);
+            int low  = static_cast<int>(g_host->getInt(args[1]));
+            int high = static_cast<int>(g_host->getInt(args[2]));
+            int dur  = static_cast<int>(g_host->getInt(args[3]));
+            return g_host->makeBool(ctx,
+                SDL_RumbleGamepad(pad,
+                    static_cast<Uint16>(std::clamp(low,  0, 0xFFFF)),
+                    static_cast<Uint16>(std::clamp(high, 0, 0xFFFF)),
+                    static_cast<Uint32>(dur)) ? 1 : 0);
+        }
     }
 
     void registerSdlNatives(MTypeContext* ctx)
@@ -387,5 +666,29 @@ namespace sdlimgui
         reg("__native__sdl_event_key_mod",         &nSdlEventKeyMod);
         reg("__native__sdl_event_key_repeat",      &nSdlEventKeyRepeat);
         reg("__native__sdl_event_text",            &nSdlEventText);
+
+        /* Phase 4 — textures */
+        reg("__native__sdl_load_texture",          &nSdlLoadTexture);
+        reg("__native__sdl_destroy_texture",       &nSdlDestroyTexture);
+        reg("__native__sdl_texture_width",         &nSdlTextureWidth);
+        reg("__native__sdl_texture_height",        &nSdlTextureHeight);
+
+        /* Phase 5 — audio */
+        reg("__native__sdl_init_audio",            &nSdlInitAudio);
+        reg("__native__sdl_play_wav",              &nSdlPlayWav);
+
+        /* Phase 5 — gamepad */
+        reg("__native__sdl_init_gamepads",         &nSdlInitGamepads);
+        reg("__native__sdl_gamepad_count",         &nSdlGamepadCount);
+        reg("__native__sdl_open_gamepad",          &nSdlOpenGamepad);
+        reg("__native__sdl_close_gamepad",         &nSdlCloseGamepad);
+        reg("__native__sdl_gamepad_axis",          &nSdlGamepadAxis);
+        reg("__native__sdl_gamepad_button",        &nSdlGamepadButton);
+        reg("__native__sdl_event_gamepad_button_down_id", &nSdlEventGamepadButtonDownId);
+        reg("__native__sdl_event_gamepad_button_up_id",   &nSdlEventGamepadButtonUpId);
+        reg("__native__sdl_event_gamepad_axis_motion_id", &nSdlEventGamepadAxisMotionId);
+
+        /* Phase 5 — haptic */
+        reg("__native__sdl_rumble_gamepad",        &nSdlRumbleGamepad);
     }
 }

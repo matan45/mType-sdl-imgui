@@ -123,4 +123,99 @@ class ImGui {
     public static function separator(): void { __native__imgui_separator(); }
     public static function spacing():   void { __native__imgui_spacing(); }
     public static function bulletText(string s): void { __native__imgui_bullet_text(s); }
+
+    // ------------------------------------------------------------------
+    // Phase 3 — layout: tables, child windows, tabs, docking, splitter.
+    // ------------------------------------------------------------------
+
+    // Tables. Pattern:
+    //   if (ImGui::beginTable("id", 3)) {
+    //     ImGui::tableSetupColumn("a"); ImGui::tableSetupColumn("b"); ImGui::tableSetupColumn("c");
+    //     ImGui::tableHeadersRow();
+    //     ImGui::tableNextRow(); ImGui::tableNextColumn(); ImGui::text("...");
+    //     ImGui::endTable();
+    //   }
+    public static function beginTable(string id, int columns): bool {
+        return __native__imgui_begin_table(id, columns);
+    }
+    public static function endTable(): void { __native__imgui_end_table(); }
+    public static function tableSetupColumn(string label): void {
+        __native__imgui_table_setup_column(label);
+    }
+    public static function tableHeadersRow(): void { __native__imgui_table_headers_row(); }
+    public static function tableNextRow():    void { __native__imgui_table_next_row(); }
+    public static function tableNextColumn(): bool { return __native__imgui_table_next_column(); }
+    public static function tableSetColumnIndex(int idx): bool {
+        return __native__imgui_table_set_column_index(idx);
+    }
+
+    // Child windows. Always call endChild even if beginChild returned false.
+    // Pass 0.0 for w/h to take the available region in that axis.
+    public static function beginChild(string id, float width, float height, bool border): bool {
+        return __native__imgui_begin_child(id, width, height, border);
+    }
+    public static function endChild(): void { __native__imgui_end_child(); }
+
+    // Tab bars.
+    public static function beginTabBar(string id): bool {
+        return __native__imgui_begin_tab_bar(id);
+    }
+    public static function endTabBar(): void { __native__imgui_end_tab_bar(); }
+    public static function beginTabItem(string label): bool {
+        return __native__imgui_begin_tab_item(label);
+    }
+    public static function endTabItem(): void { __native__imgui_end_tab_item(); }
+
+    // Docking. Call enableDocking() once at startup BEFORE the first
+    // newFrame(). Then either dockSpaceOverViewport() to make the platform
+    // window a dockspace, or dockSpace(id, w, h) inside a regular window.
+    public static function enableDocking(): void { __native__imgui_enable_docking(); }
+    public static function dockSpaceOverViewport(): void { __native__imgui_dock_space_over_viewport(); }
+    public static function dockSpace(string id, float width, float height): void {
+        __native__imgui_dock_space(id, width, height);
+    }
+
+    // Splitter. Pass current size1/size2 (e.g. left-pane width, right-pane
+    // width for a vertical splitter), plus minimum sizes. Returns float[2]
+    // = [newSize1, newSize2]. If neither pane can shrink below its min,
+    // sizes stay put.
+    public static function splitter(bool vertical, float thickness,
+                                     float size1, float size2,
+                                     float min1, float min2): float[] {
+        return __native__imgui_splitter(vertical, thickness, size1, size2, min1, min2);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 4 — image, clipboard, fonts.
+    // ------------------------------------------------------------------
+
+    // Draw a Texture as an Image widget at the given size in pixels.
+    public static function image(Texture texture, float width, float height): void {
+        __native__imgui_image(texture.handle, width, height);
+    }
+
+    public static function setClipboardText(string text): void {
+        __native__imgui_set_clipboard_text(text);
+    }
+    public static function getClipboardText(): string {
+        return __native__imgui_get_clipboard_text();
+    }
+
+    // Add a TTF font. Must be called BEFORE the first newFrame() of any
+    // frame the font is going to be used in (the SDL3 renderer backend
+    // rebuilds its font texture lazily on next frame). Returns a Font
+    // wrapper; pass it to pushFont/popFont to scope a section's text to
+    // it.
+    public static function addFontFromFile(string path, float sizePixels): Font {
+        return new Font(__native__imgui_add_font_from_file(path, sizePixels));
+    }
+    public static function pushFont(Font font): void {
+        __native__imgui_push_font(font.handle);
+    }
+    public static function popFont(): void { __native__imgui_pop_font(); }
+}
+
+class Font {
+    public int handle;
+    public constructor(int h) { this.handle = h; }
 }

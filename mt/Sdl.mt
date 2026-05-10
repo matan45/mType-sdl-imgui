@@ -113,4 +113,94 @@ class Event {
 
     // Text — valid for text input events.
     public static function text():           string { return __native__sdl_event_text(); }
+
+    // Phase 5 — gamepad event-type ids.
+    public static function gamepadButtonDownEventId(): int { return __native__sdl_event_gamepad_button_down_id(); }
+    public static function gamepadButtonUpEventId():   int { return __native__sdl_event_gamepad_button_up_id(); }
+    public static function gamepadAxisMotionEventId(): int { return __native__sdl_event_gamepad_axis_motion_id(); }
+}
+
+// ----------------------------------------------------------------------
+// Phase 4 — textures.
+// ----------------------------------------------------------------------
+
+class Texture {
+    public int handle;
+
+    public constructor(int h) {
+        this.handle = h;
+    }
+
+    public function destroy(): void {
+        __native__sdl_destroy_texture(this.handle);
+    }
+
+    public function width():  int { return __native__sdl_texture_width(this.handle); }
+    public function height(): int { return __native__sdl_texture_height(this.handle); }
+}
+
+class Textures {
+    // Load PNG / JPG / BMP / TGA via stb_image into a renderer-bound
+    // texture. Throws SdlError on decode/upload failure.
+    public static function load(Renderer renderer, string path): Texture {
+        return new Texture(__native__sdl_load_texture(renderer.handle, path));
+    }
+}
+
+// ----------------------------------------------------------------------
+// Phase 5 — audio.
+//
+// v1 surface: open default audio device on init, fire-and-forget WAV
+// playback. For looping / mp3 / ogg / mixing, vendor SDL_mixer in a
+// future revision.
+// ----------------------------------------------------------------------
+
+class Audio {
+    public static function init(): bool { return __native__sdl_init_audio(); }
+
+    // Decode a WAV from disk and play it once. Caller doesn't manage
+    // the buffer's lifetime — SDL drains it on its own thread.
+    public static function playWav(string path): bool {
+        return __native__sdl_play_wav(path);
+    }
+}
+
+// ----------------------------------------------------------------------
+// Phase 5 — gamepad + haptic.
+//
+// Axis ids map to SDL_GamepadAxis (LEFTX=0, LEFTY=1, RIGHTX=2, RIGHTY=3,
+// LEFT_TRIGGER=4, RIGHT_TRIGGER=5).
+// Button ids map to SDL_GamepadButton (SOUTH=0/A, EAST=1/B, WEST=2/X,
+// NORTH=3/Y, BACK=4, GUIDE=5, START=6, LEFT_STICK=7, RIGHT_STICK=8,
+// LEFT_SHOULDER=9, RIGHT_SHOULDER=10, DPAD_UP=11, DPAD_DOWN=12,
+// DPAD_LEFT=13, DPAD_RIGHT=14).
+// ----------------------------------------------------------------------
+
+class Gamepad {
+    public int handle;
+
+    public constructor(int h) {
+        this.handle = h;
+    }
+
+    public function close(): void { __native__sdl_close_gamepad(this.handle); }
+
+    public function axis(int axisId):    int  { return __native__sdl_gamepad_axis(this.handle, axisId); }
+    public function button(int buttonId): bool { return __native__sdl_gamepad_button(this.handle, buttonId); }
+
+    // Rumble both motors. Strengths in [0, 65535]. duration in ms.
+    public function rumble(int low, int high, int durationMs): bool {
+        return __native__sdl_rumble_gamepad(this.handle, low, high, durationMs);
+    }
+}
+
+class Gamepads {
+    // Init the gamepad subsystem. Call once before count/open.
+    public static function init(): bool { return __native__sdl_init_gamepads(); }
+
+    public static function count(): int { return __native__sdl_gamepad_count(); }
+
+    public static function open(int idx): Gamepad {
+        return new Gamepad(__native__sdl_open_gamepad(idx));
+    }
 }

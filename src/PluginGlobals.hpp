@@ -12,7 +12,10 @@
 
 struct SDL_Window;
 struct SDL_Renderer;
+struct SDL_Texture;
+struct SDL_Gamepad;
 struct ImGuiContext;
+struct ImFont;
 
 namespace sdlimgui
 {
@@ -20,7 +23,10 @@ namespace sdlimgui
 
     extern HandleRegistry<SDL_Window>   g_windows;
     extern HandleRegistry<SDL_Renderer> g_renderers;
+    extern HandleRegistry<SDL_Texture>  g_textures;     /* Phase 4 */
+    extern HandleRegistry<SDL_Gamepad>  g_gamepads;     /* Phase 5 */
     extern HandleRegistry<ImGuiContext> g_imguiContexts;
+    extern HandleRegistry<ImFont>       g_fonts;        /* Phase 4 */
 
     /* Most recently polled SDL_Event. Stored in a fixed-size byte buffer so
      * this header doesn't need to include <SDL3/SDL.h>. The actual SDL_Event

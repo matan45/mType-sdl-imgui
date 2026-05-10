@@ -3,12 +3,21 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
 
+/* stb_image implementation lives here so exactly one TU compiles it.
+ * Do NOT add STB_IMAGE_STATIC — SdlBindings.cpp also includes the header
+ * (declarations only) and needs the symbols to be linker-visible. */
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 namespace sdlimgui
 {
     const MTypePluginHost* g_host = nullptr;
     HandleRegistry<SDL_Window>   g_windows;
     HandleRegistry<SDL_Renderer> g_renderers;
+    HandleRegistry<SDL_Texture>  g_textures;
+    HandleRegistry<SDL_Gamepad>  g_gamepads;
     HandleRegistry<ImGuiContext> g_imguiContexts;
+    HandleRegistry<ImFont>       g_fonts;
     unsigned char g_lastEventBuffer[SDL_EVENT_BUFFER_BYTES] = {};
 }
 

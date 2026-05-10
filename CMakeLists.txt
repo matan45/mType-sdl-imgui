@@ -57,6 +57,7 @@ add_library(mtype_sdl_imgui SHARED
 target_include_directories(mtype_sdl_imgui PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/vendor/stb         # stb_image.h (Phase 4 textures)
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )

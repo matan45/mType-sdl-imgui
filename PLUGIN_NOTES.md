@@ -14,9 +14,9 @@ Roadmap below.
 |---|---|---|
 | 1 | init/quit · window · renderer · poll/quit event · ImGui context+backends · `Begin`/`End` · `Text` · `Button` | implemented |
 | 2 | mouse / keyboard / text-input event extraction · slider/checkbox/combo/input · color picker · `SameLine`/`Separator`/`Spacing`/`BulletText` | implemented |
-| 3 | layout: columns · child windows · tabs · docking · splitters | TODO |
-| 4 | textures (load PNG via SDL_image) · `Image` widget · custom fonts · clipboard | TODO |
-| 5 | audio (SDL_mixer or SDL_audio raw) · gamepad / haptic | TODO |
+| 3 | layout: tables · child windows · tabs · docking · hand-rolled splitter | implemented |
+| 4 | textures (PNG/JPG/BMP/TGA via stb_image) · `Image` widget · TTF fonts · clipboard | implemented |
+| 5 | audio (fire-and-forget WAV via SDL3 audio streams) · gamepad polling+events · rumble | implemented |
 
 Each phase adds ~20–30 native functions and the corresponding mType wrapper
 methods. Phases are independent — Phase 2 can land before Phase 3 etc.
@@ -26,6 +26,26 @@ methods. Phases are independent — Phase 2 can land before Phase 3 etc.
 - SDL: event-type id constants (`mouseMotionEventId`, `mouseButtonDownEventId`, `mouseButtonUpEventId`, `mouseWheelEventId`, `keyDownEventId`, `keyUpEventId`, `textInputEventId`) plus an `Event` static class with `mouseX`/`mouseY`/`mouseButton`/`mouseClicks`/`wheelY`/`keyScancode`/`keyKeycode`/`keyMod`/`keyRepeat`/`text` payload accessors.
 - ImGui inputs: `sliderFloat`, `sliderInt`, `checkbox`, `combo(label, idx, string[])`, `inputText(label, current, maxCap)`, `colorEdit3` (returns `float[3]`), plus `widgetChanged()` to detect "did the last widget mutate this frame" (separate signal because returned-value comparison can't tell when a slider is dragged back to its starting value within one frame).
 - ImGui layout: `sameLine`, `separator`, `spacing`, `bulletText`.
+
+**Phase 3 detail** (added 2026-05):
+
+- ImGui Tables (preferred over deprecated Columns): `beginTable(id, columns)`, `endTable`, `tableSetupColumn(label)`, `tableHeadersRow`, `tableNextRow`, `tableNextColumn` (→ bool), `tableSetColumnIndex(idx)` (→ bool). The plugin defaults to `Borders | RowBg | Resizable` flags — change `nImGuiBeginTable` if you need different defaults.
+- ImGui Child windows: `beginChild(id, w, h, border)` (pass 0.0 to take available space in that axis), `endChild`. Always call endChild even when begin returned false.
+- ImGui Tab bars: `beginTabBar(id)` / `endTabBar`, `beginTabItem(label)` / `endTabItem`.
+- ImGui Docking (docking branch only): `enableDocking()` sets `ImGuiConfigFlags_DockingEnable` on `io.ConfigFlags` — call once at startup BEFORE the first `newFrame`. `dockSpaceOverViewport()` makes the entire platform window a dockspace; `dockSpace(id, w, h)` spawns one inside an existing window. Subsequent `Begin()` windows become dockable.
+- ImGui Splitter: hand-rolled (no `imgui_internal.h`) using `InvisibleButton` + `IO::MouseDelta`. Returns `float[2] = [newSize1, newSize2]`. Cursor changes to N-S/W-E resize on hover. Drag is clamped at min1/min2 — if either pane is at its minimum, no further movement in that direction.
+
+**Phase 4 detail** (added 2026-05):
+
+- **Textures**: vendored single-header `stb_image.h` (under `vendor/stb/`, downloaded from `nothings/stb`). The implementation define lives in `PluginEntry.cpp` so exactly one TU compiles it. `Textures::load(renderer, path)` decodes PNG/JPG/BMP/TGA/PSD/GIF to RGBA8, creates an `SDL_Texture` via `SDL_CreateTexture` + `SDL_UpdateTexture`, and returns a `Texture` wrapper (linear scale-mode by default). `ImGui::image(texture, w, h)` draws it. Texture handles live in `g_textures: HandleRegistry<SDL_Texture>`.
+- **Fonts**: `ImGui::addFontFromFile(path, sizePixels)` wraps `ImGui::GetIO().Fonts->AddFontFromFileTTF`. Returns a `Font` wrapper. **Must be called BEFORE the first `newFrame()` of any frame the font is going to render in** — the SDL3 renderer backend rebuilds its font texture lazily on next frame. `pushFont(font)` / `popFont()` scope a section of widgets to the font.
+- **Clipboard**: `ImGui::setClipboardText(s)` / `getClipboardText()` delegate to ImGui's wrapper, which dispatches through the SDL3 platform backend.
+
+**Phase 5 detail** (added 2026-05):
+
+- **Audio (minimal v1)**: `Audio::init()` initialises `SDL_INIT_AUDIO`. `Audio::playWav(path)` decodes a WAV via `SDL_LoadWAV`, opens a default playback device with `SDL_OpenAudioDeviceStream`, queues + flushes the buffer, and resumes the stream. The stream + buffer are intentionally leaked (SDL drains on its own thread). For looping / mp3 / ogg / mixing, vendor SDL_mixer in a future phase and add a richer API.
+- **Gamepad**: `Gamepads::init()` initialises `SDL_INIT_GAMEPAD`. `Gamepads::count()` returns the connected count via `SDL_GetGamepads`. `Gamepads::open(idx)` opens the Nth gamepad and returns a `Gamepad` wrapper. `Gamepad::axis(axisId)` reads an axis (-32768..32767), `Gamepad::button(btnId)` reads a button (bool). Axis/button id constants are documented inline in `Sdl.mt`. Event-type constants exposed: `gamepadButtonDownEventId`, `gamepadButtonUpEventId`, `gamepadAxisMotionEventId`.
+- **Haptic**: `Gamepad::rumble(low, high, durationMs)` wraps `SDL_RumbleGamepad` (low/high motor strengths in [0, 65535]). The lower-level `SDL_Haptic` API is deferred.
 
 ## Vendoring
 

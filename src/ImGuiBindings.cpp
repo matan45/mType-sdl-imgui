@@ -348,6 +348,323 @@ namespace sdlimgui
             ImGui::BulletText("%s", s);
             return g_host->makeVoid(ctx);
         }
+
+        /* ----------------------------------------------------------------
+         * Phase 3: Tables. Preferred over the deprecated Columns API.
+         * Pattern:
+         *   if (beginTable("id", 3)) {
+         *     setupColumn("a"); setupColumn("b"); setupColumn("c");
+         *     headersRow();
+         *     for each row { nextRow(); nextColumn(); text(...); ... }
+         *     endTable();
+         *   }
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiBeginTable(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_begin_table")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* id = getStr(args[0]);
+            int cols = static_cast<int>(g_host->getInt(args[1]));
+            ImGuiTableFlags flags = ImGuiTableFlags_Borders
+                                  | ImGuiTableFlags_RowBg
+                                  | ImGuiTableFlags_Resizable;
+            return g_host->makeBool(ctx, ImGui::BeginTable(id, cols, flags) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndTable(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndTable();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTableSetupColumn(void*, MTypeContext* ctx,
+                                             const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_table_setup_column")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::TableSetupColumn(getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTableHeadersRow(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::TableHeadersRow();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTableNextRow(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::TableNextRow();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTableNextColumn(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::TableNextColumn() ? 1 : 0);
+        }
+        MTypeValue* nImGuiTableSetColumnIndex(void*, MTypeContext* ctx,
+                                                const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_table_set_column_index")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int idx = static_cast<int>(g_host->getInt(args[0]));
+            return g_host->makeBool(ctx, ImGui::TableSetColumnIndex(idx) ? 1 : 0);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 3: Child windows.
+         * Pattern:
+         *   if (beginChild("id", w, h, true)) {  // last arg = border
+         *     // ...content...
+         *   }
+         *   endChild();   // ALWAYS call, even if begin returned false.
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiBeginChild(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__imgui_begin_child")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* id = getStr(args[0]);
+            ImVec2 size(static_cast<float>(g_host->getFloat(args[1])),
+                        static_cast<float>(g_host->getFloat(args[2])));
+            bool border = g_host->getBool(args[3]) != 0;
+            ImGuiChildFlags childFlags = border ? ImGuiChildFlags_Borders : ImGuiChildFlags_None;
+            return g_host->makeBool(ctx, ImGui::BeginChild(id, size, childFlags) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndChild(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndChild();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 3: Tab bars.
+         * Pattern:
+         *   if (beginTabBar("##bar")) {
+         *     if (beginTabItem("one")) { … endTabItem(); }
+         *     if (beginTabItem("two")) { … endTabItem(); }
+         *     endTabBar();
+         *   }
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiBeginTabBar(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_tab_bar")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginTabBar(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndTabBar(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndTabBar();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBeginTabItem(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_tab_item")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginTabItem(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndTabItem(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndTabItem();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 3: Docking. Requires ImGuiConfigFlags_DockingEnable on the
+         * IO before any NewFrame; the engine-side wrapper exposes
+         * enableDocking() to set it once at startup.
+         *
+         * dockSpaceOverViewport() is the easy mode: makes the entire
+         * platform window a dockspace. Subsequent regular Begin() windows
+         * automatically become dockable into it.
+         *
+         * dockSpace(id, w, h) spawns a dockspace inside an existing window
+         * (use after a normal Begin()).
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiEnableDocking(void*, MTypeContext* ctx,
+                                          const MTypeValue* const*, int)
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiDockSpaceOverViewport(void*, MTypeContext* ctx,
+                                                  const MTypeValue* const*, int)
+        {
+            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiDockSpace(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_dock_space")) {
+                return g_host->makeVoid(ctx);
+            }
+            const char* id = getStr(args[0]);
+            ImVec2 size(static_cast<float>(g_host->getFloat(args[1])),
+                        static_cast<float>(g_host->getFloat(args[2])));
+            ImGui::DockSpace(ImGui::GetID(id), size);
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 3: Splitter (hand-rolled — no imgui_internal dependency).
+         *
+         * Creates an InvisibleButton sized to (thickness × full available
+         * height) for vertical splits, or (full width × thickness) for
+         * horizontal. While dragged, redistributes the delta between
+         * size1 and size2, clamping at min1/min2.
+         *
+         * Returns float[2] = [newSize1, newSize2]. The bool change-flag
+         * is also written to g_lastWidgetChanged so widgetChanged() works
+         * for splitters too.
+         *
+         * Caller pattern:
+         *   float[] sz = ImGui.splitter(true, 4.0, leftW, rightW, 100.0, 100.0);
+         *   leftW = sz[0]; rightW = sz[1];
+         *   if (ImGui.beginChild("##L", leftW, 0.0, false)) { ... } ImGui.endChild();
+         *   ImGui.sameLine();
+         *   if (ImGui.beginChild("##R", rightW, 0.0, false)) { ... } ImGui.endChild();
+         * ---------------------------------------------------------------- */
+
+        /* ----------------------------------------------------------------
+         * Phase 4: textures (Image), clipboard, fonts.
+         * ---------------------------------------------------------------- */
+
+        /* ImGui::Image takes an ImTextureID. With the SDL3 renderer
+         * backend, ImTextureID is the SDL_Texture* (cast as needed).
+         * Caller passes the texture id minted by __native__sdl_load_texture. */
+        MTypeValue* nImGuiImage(void*, MTypeContext* ctx,
+                                  const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_image")) {
+                return g_host->makeVoid(ctx);
+            }
+            int64_t texId = g_host->getInt(args[0]);
+            SDL_Texture* tex = g_textures.find(texId);
+            if (!tex) return g_host->makeVoid(ctx);
+            ImVec2 size(static_cast<float>(g_host->getFloat(args[1])),
+                        static_cast<float>(g_host->getFloat(args[2])));
+            ImGui::Image(reinterpret_cast<ImTextureID>(tex), size);
+            return g_host->makeVoid(ctx);
+        }
+
+        MTypeValue* nImGuiSetClipboardText(void*, MTypeContext* ctx,
+                                             const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_set_clipboard_text")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::SetClipboardText(getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiGetClipboardText(void*, MTypeContext* ctx,
+                                             const MTypeValue* const*, int)
+        {
+            const char* s = ImGui::GetClipboardText();
+            if (!s) return g_host->makeString(ctx, "", 0);
+            return g_host->makeString(ctx, s, std::strlen(s));
+        }
+
+        /* Fonts. AddFontFromFileTTF must be called BEFORE the first
+         * NewFrame for the font to be available; the SDL3 renderer
+         * backend rebuilds its font texture lazily on the next frame.
+         * Returns the font handle (or 0 on failure). */
+        MTypeValue* nImGuiAddFontFromFile(void*, MTypeContext* ctx,
+                                            const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_add_font_from_file")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* path = getStr(args[0]);
+            float size = static_cast<float>(g_host->getFloat(args[1]));
+            ImFont* font = ImGui::GetIO().Fonts->AddFontFromFileTTF(path, size);
+            if (!font) {
+                std::string m = std::string("__native__imgui_add_font_from_file: failed to load '")
+                              + path + "'";
+                g_host->raiseError(ctx, "ImGuiError", m.c_str());
+                return g_host->makeInt(ctx, 0);
+            }
+            return g_host->makeInt(ctx, g_fonts.insert(font));
+        }
+        MTypeValue* nImGuiPushFont(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_push_font")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImFont* font = g_fonts.find(g_host->getInt(args[0]));
+            if (font) ImGui::PushFont(font);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPopFont(void*, MTypeContext* ctx,
+                                    const MTypeValue* const*, int)
+        {
+            ImGui::PopFont();
+            return g_host->makeVoid(ctx);
+        }
+
+        MTypeValue* nImGuiSplitter(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 6, "__native__imgui_splitter")) {
+                return g_host->makeNull(ctx);
+            }
+            bool vertical = g_host->getBool(args[0]) != 0;
+            float thickness = static_cast<float>(g_host->getFloat(args[1]));
+            float size1 = static_cast<float>(g_host->getFloat(args[2]));
+            float size2 = static_cast<float>(g_host->getFloat(args[3]));
+            float min1  = static_cast<float>(g_host->getFloat(args[4]));
+            float min2  = static_cast<float>(g_host->getFloat(args[5]));
+
+            ImVec2 btnSize = vertical ? ImVec2(thickness, ImGui::GetContentRegionAvail().y)
+                                       : ImVec2(ImGui::GetContentRegionAvail().x, thickness);
+
+            /* Style the invisible button to look like Separator. */
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                ImGui::GetStyleColorVec4(ImGuiCol_Separator));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                ImGui::GetStyleColorVec4(ImGuiCol_SeparatorHovered));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                ImGui::GetStyleColorVec4(ImGuiCol_SeparatorActive));
+            ImGui::Button(vertical ? "##vsplitter" : "##hsplitter", btnSize);
+            ImGui::PopStyleColor(3);
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(vertical ? ImGuiMouseCursor_ResizeEW
+                                                : ImGuiMouseCursor_ResizeNS);
+            }
+
+            bool changed = false;
+            if (ImGui::IsItemActive()) {
+                float delta = vertical ? ImGui::GetIO().MouseDelta.x
+                                        : ImGui::GetIO().MouseDelta.y;
+                if (delta != 0.0f) {
+                    float ns1 = std::max(size1 + delta, min1);
+                    float ns2 = std::max(size2 - delta, min2);
+                    /* Only commit if both clamps were honored. */
+                    if (ns1 + ns2 == size1 + size2) {
+                        size1 = ns1;
+                        size2 = ns2;
+                        changed = true;
+                    }
+                }
+            }
+            g_lastWidgetChanged = changed;
+
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 2);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, size1));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, size2));
+            return out;
+        }
     }
 
     void registerImGuiNatives(MTypeContext* ctx)
@@ -383,5 +700,40 @@ namespace sdlimgui
         reg("__native__imgui_separator",               &nImGuiSeparator);
         reg("__native__imgui_spacing",                 &nImGuiSpacing);
         reg("__native__imgui_bullet_text",             &nImGuiBulletText);
+
+        /* Phase 3 — Tables */
+        reg("__native__imgui_begin_table",             &nImGuiBeginTable);
+        reg("__native__imgui_end_table",               &nImGuiEndTable);
+        reg("__native__imgui_table_setup_column",      &nImGuiTableSetupColumn);
+        reg("__native__imgui_table_headers_row",       &nImGuiTableHeadersRow);
+        reg("__native__imgui_table_next_row",          &nImGuiTableNextRow);
+        reg("__native__imgui_table_next_column",       &nImGuiTableNextColumn);
+        reg("__native__imgui_table_set_column_index",  &nImGuiTableSetColumnIndex);
+
+        /* Phase 3 — Child windows */
+        reg("__native__imgui_begin_child",             &nImGuiBeginChild);
+        reg("__native__imgui_end_child",               &nImGuiEndChild);
+
+        /* Phase 3 — Tab bars */
+        reg("__native__imgui_begin_tab_bar",           &nImGuiBeginTabBar);
+        reg("__native__imgui_end_tab_bar",             &nImGuiEndTabBar);
+        reg("__native__imgui_begin_tab_item",          &nImGuiBeginTabItem);
+        reg("__native__imgui_end_tab_item",            &nImGuiEndTabItem);
+
+        /* Phase 3 — Docking */
+        reg("__native__imgui_enable_docking",          &nImGuiEnableDocking);
+        reg("__native__imgui_dock_space_over_viewport", &nImGuiDockSpaceOverViewport);
+        reg("__native__imgui_dock_space",              &nImGuiDockSpace);
+
+        /* Phase 3 — Splitter */
+        reg("__native__imgui_splitter",                &nImGuiSplitter);
+
+        /* Phase 4 — image, clipboard, fonts */
+        reg("__native__imgui_image",                   &nImGuiImage);
+        reg("__native__imgui_set_clipboard_text",      &nImGuiSetClipboardText);
+        reg("__native__imgui_get_clipboard_text",      &nImGuiGetClipboardText);
+        reg("__native__imgui_add_font_from_file",      &nImGuiAddFontFromFile);
+        reg("__native__imgui_push_font",               &nImGuiPushFont);
+        reg("__native__imgui_pop_font",                &nImGuiPopFont);
     }
 }

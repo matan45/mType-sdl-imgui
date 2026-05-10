@@ -38,11 +38,35 @@ mtype-imgui-sdl/
 └── PLUGIN_NOTES.md          # internal: handle registry, phase roadmap
 ```
 
-If `vendor/SDL3` or `vendor/imgui` are missing, populate them:
+All three vendor directories are **git submodules**. Initialize them after cloning the repo:
 
 ```
-git clone --depth=1 https://github.com/libsdl-org/SDL.git vendor/SDL3
-git clone --depth=1 --branch docking https://github.com/ocornut/imgui.git vendor/imgui
+git clone https://github.com/<you>/mtype-imgui-sdl.git
+cd mtype-imgui-sdl
+git submodule update --init --recursive
+```
+
+Or in one shot:
+
+```
+git clone --recursive https://github.com/<you>/mtype-imgui-sdl.git
+```
+
+Submodule sources:
+
+| Path           | URL                                       | Notes |
+|----------------|-------------------------------------------|---|
+| `vendor/SDL3`  | https://github.com/libsdl-org/SDL.git     | Default branch (SDL3) — shallow checkout. |
+| `vendor/imgui` | https://github.com/ocornut/imgui.git      | `docking` branch — full checkout (shallow + branch combo isn't reliably supported by `git submodule add`). |
+| `vendor/stb`   | https://github.com/nothings/stb.git       | Shallow. We only consume `stb_image.h`. |
+
+To update a submodule to its latest commit on the configured branch:
+
+```
+git -C vendor/SDL3  pull origin main
+git -C vendor/imgui pull origin docking
+git -C vendor/stb   pull origin master
+git add vendor/SDL3 vendor/imgui vendor/stb && git commit -m "bump vendors"
 ```
 
 ## Build
