@@ -41,7 +41,7 @@ mtype-imgui-sdl/
 All three vendor directories are **git submodules**. Initialize them after cloning the repo:
 
 ```
-git clone https://github.com/<you>/mtype-imgui-sdl.git
+git clone https://github.com/matan45/mtype-imgui-sdl.git
 cd mtype-imgui-sdl
 git submodule update --init --recursive
 ```
@@ -49,7 +49,7 @@ git submodule update --init --recursive
 Or in one shot:
 
 ```
-git clone --recursive https://github.com/<you>/mtype-imgui-sdl.git
+git clone --recursive https://github.com/matan45/mtype-imgui-sdl.git
 ```
 
 Submodule sources:
