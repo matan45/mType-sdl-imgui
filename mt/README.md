@@ -34,6 +34,7 @@ Additional demos:
 bin\mType\Release\x64\mType.exe examples\sdl-imgui-demo\demo_input.mt
 bin\mType\Release\x64\mType.exe examples\sdl-imgui-demo\demo_menus.mt
 bin\mType\Release\x64\mType.exe examples\sdl-imgui-demo\demo_realtime.mt
+bin\mType\Release\x64\mType.exe examples\sdl-imgui-demo\demo_load_image.mt
 ```
 
 ## Files
@@ -48,3 +49,4 @@ bin\mType\Release\x64\mType.exe examples\sdl-imgui-demo\demo_realtime.mt
 | `demo/demo_input.mt`     | Phase 7-A — `isItemHovered`, `getMousePos`, `isKeyPressed`, `pushID` over a 4×4 grid, ProgressBar. |
 | `demo/demo_menus.mt`     | Phase 7-B — main menu bar, hover-tooltips, collapsing header + tree nodes, `inputInt/inputText/inputTextMultiline`, `dragFloat`. |
 | `demo/demo_realtime.mt`  | Phase 7-C — WASD-moves-a-rect game loop driven by `Keyboard::isDown`, mouse crosshair via `Mouse::state`, SDL renderer primitives (line / fillRect), F11 fullscreen, live FPS in window title. |
+| `demo/demo_load_image.mt` | Exercises `Textures::load` (the stb_image file-decode path). Synthesises a BMP on disk via `Textures::writeCheckerboardBmp` so the demo runs without a shipped asset, then loads it through the regular `Textures::load` pipeline and draws it three ways: `ImGui::image`, `renderer.renderTexture`, and `renderer.renderTextureRotated`. Swap the path in the script to load your own PNG / JPG / BMP / TGA. |
