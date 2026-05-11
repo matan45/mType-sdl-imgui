@@ -8,8 +8,8 @@
 // Run from a working directory that contains mtype_sdl_imgui.dll
 // (and SDL3.dll alongside it). Adjust the load path if needed.
 
-import * from "Sdl.mt";
-import * from "ImGui.mt";
+import * from "../lib/Sdl.mt";
+import * from "../lib/ImGui.mt";
 
 __plugin_load("mt/mtype_sdl_imgui.dll");
 

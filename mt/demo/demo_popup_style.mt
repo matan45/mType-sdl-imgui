@@ -1,8 +1,8 @@
 // Focused example: ImGui popups (modal + non-modal + context menu) and
 // styles (theme switching + per-widget color/var overrides).
 
-import * from "Sdl.mt";
-import * from "ImGui.mt";
+import * from "../lib/Sdl.mt";
+import * from "../lib/ImGui.mt";
 
 __plugin_load("mt/mtype_sdl_imgui.dll");
 
