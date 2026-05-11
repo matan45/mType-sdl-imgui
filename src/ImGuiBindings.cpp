@@ -15,6 +15,7 @@
  */
 
 #include "PluginGlobals.hpp"
+#include "BindingHelpers.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -31,24 +32,15 @@ namespace sdlimgui
 {
     namespace
     {
-        bool requireArgs(MTypeContext* ctx, int argc, int expected, const char* name)
-        {
-            if (argc != expected) {
-                std::string m = std::string(name) + ": expected " + std::to_string(expected)
-                              + " args, got " + std::to_string(argc);
-                g_host->raiseError(ctx, "ImGuiError", m.c_str());
-                return false;
-            }
-            return true;
-        }
+        constexpr const char* kEx = "ImGuiError";
 
-        const char* getStr(const MTypeValue* v, size_t* outLen = nullptr)
+        inline bool requireArgs(MTypeContext* ctx, int argc, int expected, const char* name)
         {
-            if (g_host->getTag(v) != MT_TAG_STRING) {
-                if (outLen) *outLen = 0;
-                return "";
-            }
-            return g_host->getString(v, outLen);
+            return detail::requireArgs(ctx, argc, expected, name, kEx);
+        }
+        inline const char* getStr(const MTypeValue* v, size_t* outLen = nullptr)
+        {
+            return detail::getStr(v, outLen);
         }
 
         /* ---------------------------------------------------------------- */
@@ -943,6 +935,465 @@ namespace sdlimgui
             g_host->arraySet(out, 1, g_host->makeFloat(ctx, size2));
             return out;
         }
+
+        /* ----------------------------------------------------------------
+         * Phase 7-A: interactivity queries, ID stack, ProgressBar.
+         *
+         * All "is item / is window" queries take zero args and read state
+         * for the *previously submitted* widget (item) or *current* window
+         * — same lifetime rules as native ImGui. Mouse and key queries
+         * accept their target as an int constant (button index or
+         * ImGuiKey value); the key constants are exposed as a family of
+         * tiny `__native__imgui_key_*_id` natives registered below.
+         * ---------------------------------------------------------------- */
+
+        MTypeValue* nImGuiIsItemHovered(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsItemHovered() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsItemActive(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsItemActive() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsItemFocused(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsItemFocused() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsItemClicked(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsItemClicked() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsItemEdited(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsItemEdited() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsWindowHovered(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsWindowHovered() ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsWindowFocused(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::IsWindowFocused() ? 1 : 0);
+        }
+
+        MTypeValue* nImGuiGetWindowSize(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImVec2 s = ImGui::GetWindowSize();
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 2);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, s.x));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, s.y));
+            return out;
+        }
+        MTypeValue* nImGuiGetWindowPos(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImVec2 p = ImGui::GetWindowPos();
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 2);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, p.x));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, p.y));
+            return out;
+        }
+        MTypeValue* nImGuiGetMousePos(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImVec2 p = ImGui::GetMousePos();
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 2);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, p.x));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, p.y));
+            return out;
+        }
+
+        MTypeValue* nImGuiIsMouseClicked(void*, MTypeContext* ctx,
+                                          const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_is_mouse_clicked")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int btn = static_cast<int>(g_host->getInt(args[0]));
+            return g_host->makeBool(ctx, ImGui::IsMouseClicked(btn) ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsMouseDown(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_is_mouse_down")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int btn = static_cast<int>(g_host->getInt(args[0]));
+            return g_host->makeBool(ctx, ImGui::IsMouseDown(btn) ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsKeyPressed(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_is_key_pressed")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int k = static_cast<int>(g_host->getInt(args[0]));
+            return g_host->makeBool(ctx, ImGui::IsKeyPressed(static_cast<ImGuiKey>(k)) ? 1 : 0);
+        }
+        MTypeValue* nImGuiIsKeyDown(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_is_key_down")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int k = static_cast<int>(g_host->getInt(args[0]));
+            return g_host->makeBool(ctx, ImGui::IsKeyDown(static_cast<ImGuiKey>(k)) ? 1 : 0);
+        }
+
+        /* ID stack — required for any list that draws widgets with
+         * duplicate labels. PushID pairs with PopID. */
+        MTypeValue* nImGuiPushIdStr(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_push_id_str")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::PushID(getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPushIdInt(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_push_id_int")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::PushID(static_cast<int>(g_host->getInt(args[0])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiPopId(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::PopID();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ProgressBar. Pass width<0 / height<0 to take available width /
+         * default height respectively (-1.0 here triggers ImGui's
+         * "use default" path; native API uses -FLT_MIN, but -1 is below
+         * any plausible pixel size and serves the same role). */
+        MTypeValue* nImGuiProgressBar(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 4, "__native__imgui_progress_bar")) {
+                return g_host->makeVoid(ctx);
+            }
+            float frac = static_cast<float>(g_host->getFloat(args[0]));
+            float w    = static_cast<float>(g_host->getFloat(args[1]));
+            float h    = static_cast<float>(g_host->getFloat(args[2]));
+            const char* overlay = getStr(args[3]);
+            ImGui::ProgressBar(frac, ImVec2(w, h), (overlay && overlay[0]) ? overlay : nullptr);
+            return g_host->makeVoid(ctx);
+        }
+
+        /* ----------------------------------------------------------------
+         * Phase 7-B: menus, tooltips, trees, text variants, numeric
+         * inputs, layout precision.
+         *
+         * Main menu bars are top-level (no containing window required).
+         * In-window menu bars need the window to carry the MenuBar flag
+         * at Begin time — `beginMenuBarWindow` opens such a window.
+         * ---------------------------------------------------------------- */
+
+        /* Menus. */
+        MTypeValue* nImGuiBeginMainMenuBar(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::BeginMainMenuBar() ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndMainMenuBar(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndMainMenuBar();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBeginMenuBarWindow(void*, MTypeContext* ctx,
+                                              const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_menu_bar_window")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* name = getStr(args[0]);
+            return g_host->makeBool(ctx,
+                ImGui::Begin(name, nullptr, ImGuiWindowFlags_MenuBar) ? 1 : 0);
+        }
+        MTypeValue* nImGuiBeginMenuBar(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::BeginMenuBar() ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndMenuBar(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndMenuBar();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBeginMenu(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_begin_menu")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::BeginMenu(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndMenu(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndMenu();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiMenuItem(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_menu_item")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            const char* shortcut = getStr(args[1]);
+            return g_host->makeBool(ctx,
+                ImGui::MenuItem(label, (shortcut && shortcut[0]) ? shortcut : nullptr) ? 1 : 0);
+        }
+        /* Returns bool[2] = [clicked, newChecked]. */
+        MTypeValue* nImGuiMenuItemCheck(void*, MTypeContext* ctx,
+                                          const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_menu_item_check")) {
+                return g_host->makeNull(ctx);
+            }
+            const char* label = getStr(args[0]);
+            const char* shortcut = getStr(args[1]);
+            bool sel = g_host->getBool(args[2]) != 0;
+            bool clicked = ImGui::MenuItem(label,
+                                           (shortcut && shortcut[0]) ? shortcut : nullptr,
+                                           &sel);
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_BOOL, 2);
+            g_host->arraySet(out, 0, g_host->makeBool(ctx, clicked ? 1 : 0));
+            g_host->arraySet(out, 1, g_host->makeBool(ctx, sel ? 1 : 0));
+            return out;
+        }
+
+        /* Tooltips. */
+        MTypeValue* nImGuiSetTooltip(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_set_tooltip")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::SetTooltip("%s", getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiBeginTooltip(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeBool(ctx, ImGui::BeginTooltip() ? 1 : 0);
+        }
+        MTypeValue* nImGuiEndTooltip(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndTooltip();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* Text variants. */
+        MTypeValue* nImGuiTextColored(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__imgui_text_colored")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImVec4 c(static_cast<float>(g_host->getFloat(args[0])),
+                     static_cast<float>(g_host->getFloat(args[1])),
+                     static_cast<float>(g_host->getFloat(args[2])),
+                     static_cast<float>(g_host->getFloat(args[3])));
+            ImGui::TextColored(c, "%s", getStr(args[4]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTextWrapped(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_text_wrapped")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::TextWrapped("%s", getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiTextDisabled(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_text_disabled")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::TextDisabled("%s", getStr(args[0]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiLabelText(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_label_text")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::LabelText(getStr(args[0]), "%s", getStr(args[1]));
+            return g_host->makeVoid(ctx);
+        }
+
+        /* Trees. */
+        MTypeValue* nImGuiTreeNode(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_tree_node")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::TreeNode(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiTreePop(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::TreePop();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiCollapsingHeader(void*, MTypeContext* ctx,
+                                             const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_collapsing_header")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, ImGui::CollapsingHeader(getStr(args[0])) ? 1 : 0);
+        }
+        MTypeValue* nImGuiSelectable(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_selectable")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            bool sel = g_host->getBool(args[1]) != 0;
+            bool clicked = ImGui::Selectable(label, sel);
+            g_lastWidgetChanged = clicked;
+            return g_host->makeBool(ctx, clicked ? 1 : 0);
+        }
+
+        /* Numeric inputs. */
+        MTypeValue* nImGuiInputFloat(void*, MTypeContext* ctx,
+                                       const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_input_float")) {
+                return g_host->makeFloat(ctx, 0.0);
+            }
+            const char* label = getStr(args[0]);
+            float v = static_cast<float>(g_host->getFloat(args[1]));
+            g_lastWidgetChanged = ImGui::InputFloat(label, &v);
+            return g_host->makeFloat(ctx, static_cast<double>(v));
+        }
+        MTypeValue* nImGuiInputInt(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_input_int")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            int v = static_cast<int>(g_host->getInt(args[1]));
+            g_lastWidgetChanged = ImGui::InputInt(label, &v);
+            return g_host->makeInt(ctx, static_cast<int64_t>(v));
+        }
+        MTypeValue* nImGuiDragFloat(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_drag_float")) {
+                return g_host->makeFloat(ctx, 0.0);
+            }
+            const char* label = getStr(args[0]);
+            float v = static_cast<float>(g_host->getFloat(args[1]));
+            float speed = static_cast<float>(g_host->getFloat(args[2]));
+            g_lastWidgetChanged = ImGui::DragFloat(label, &v, speed);
+            return g_host->makeFloat(ctx, static_cast<double>(v));
+        }
+        MTypeValue* nImGuiDragInt(void*, MTypeContext* ctx,
+                                    const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__imgui_drag_int")) {
+                return g_host->makeInt(ctx, 0);
+            }
+            const char* label = getStr(args[0]);
+            int v = static_cast<int>(g_host->getInt(args[1]));
+            float speed = static_cast<float>(g_host->getFloat(args[2]));
+            g_lastWidgetChanged = ImGui::DragInt(label, &v, speed);
+            return g_host->makeInt(ctx, static_cast<int64_t>(v));
+        }
+        MTypeValue* nImGuiInputTextMultiline(void*, MTypeContext* ctx,
+                                               const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__imgui_input_text_multiline")) {
+                return g_host->makeString(ctx, "", 0);
+            }
+            const char* label = getStr(args[0]);
+            size_t curLen = 0;
+            const char* curStr = getStr(args[1], &curLen);
+            int requestedCap = static_cast<int>(g_host->getInt(args[2]));
+            float w = static_cast<float>(g_host->getFloat(args[3]));
+            float h = static_cast<float>(g_host->getFloat(args[4]));
+
+            constexpr size_t kMinCap = 256;
+            constexpr size_t kMaxCap = 1 << 16;
+            size_t cap = static_cast<size_t>(std::max(0, requestedCap));
+            if (cap < kMinCap) cap = kMinCap;
+            if (cap > kMaxCap) cap = kMaxCap;
+
+            std::vector<char> buf(cap, 0);
+            size_t copy = std::min(curLen, cap - 1);
+            std::memcpy(buf.data(), curStr, copy);
+            buf[copy] = '\0';
+
+            g_lastWidgetChanged = ImGui::InputTextMultiline(label, buf.data(), cap, ImVec2(w, h));
+            return g_host->makeString(ctx, buf.data(), std::strlen(buf.data()));
+        }
+
+        /* Layout precision. */
+        MTypeValue* nImGuiBeginGroup(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::BeginGroup();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiEndGroup(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImGui::EndGroup();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiIndent(void*, MTypeContext* ctx,
+                                   const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_indent")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::Indent(static_cast<float>(g_host->getFloat(args[0])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiUnindent(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__imgui_unindent")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImGui::Unindent(static_cast<float>(g_host->getFloat(args[0])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiGetCursorPos(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            ImVec2 p = ImGui::GetCursorPos();
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 2);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, p.x));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, p.y));
+            return out;
+        }
+        MTypeValue* nImGuiSetCursorPos(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_set_cursor_pos")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImVec2 p(static_cast<float>(g_host->getFloat(args[0])),
+                     static_cast<float>(g_host->getFloat(args[1])));
+            ImGui::SetCursorPos(p);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nImGuiDummy(void*, MTypeContext* ctx,
+                                  const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__imgui_dummy")) {
+                return g_host->makeVoid(ctx);
+            }
+            ImVec2 s(static_cast<float>(g_host->getFloat(args[0])),
+                     static_cast<float>(g_host->getFloat(args[1])));
+            ImGui::Dummy(s);
+            return g_host->makeVoid(ctx);
+        }
     }
 
     void registerImGuiNatives(MTypeContext* ctx)
@@ -1033,5 +1484,120 @@ namespace sdlimgui
         reg("__native__imgui_push_style_var_float",        &nImGuiPushStyleVarFloat);
         reg("__native__imgui_push_style_var_vec2",         &nImGuiPushStyleVarVec2);
         reg("__native__imgui_pop_style_var",               &nImGuiPopStyleVar);
+
+        /* Phase 7-A — interactivity queries */
+        reg("__native__imgui_is_item_hovered",   &nImGuiIsItemHovered);
+        reg("__native__imgui_is_item_active",    &nImGuiIsItemActive);
+        reg("__native__imgui_is_item_focused",   &nImGuiIsItemFocused);
+        reg("__native__imgui_is_item_clicked",   &nImGuiIsItemClicked);
+        reg("__native__imgui_is_item_edited",    &nImGuiIsItemEdited);
+        reg("__native__imgui_is_window_hovered", &nImGuiIsWindowHovered);
+        reg("__native__imgui_is_window_focused", &nImGuiIsWindowFocused);
+        reg("__native__imgui_get_window_size",   &nImGuiGetWindowSize);
+        reg("__native__imgui_get_window_pos",    &nImGuiGetWindowPos);
+        reg("__native__imgui_get_mouse_pos",     &nImGuiGetMousePos);
+        reg("__native__imgui_is_mouse_clicked",  &nImGuiIsMouseClicked);
+        reg("__native__imgui_is_mouse_down",     &nImGuiIsMouseDown);
+        reg("__native__imgui_is_key_pressed",    &nImGuiIsKeyPressed);
+        reg("__native__imgui_is_key_down",       &nImGuiIsKeyDown);
+
+        /* Phase 7-A — ID stack */
+        reg("__native__imgui_push_id_str", &nImGuiPushIdStr);
+        reg("__native__imgui_push_id_int", &nImGuiPushIdInt);
+        reg("__native__imgui_pop_id",      &nImGuiPopId);
+
+        /* Phase 7-A — progress bar */
+        reg("__native__imgui_progress_bar", &nImGuiProgressBar);
+
+        /* Phase 7-A — ImGuiKey constant getters. Each is a tiny
+         * non-capturing lambda that returns the ImGuiKey int. Names
+         * follow __native__imgui_key_<lower>_id. */
+        #define REG_KEY(NAME_LOWER, IMKEY) \
+            reg("__native__imgui_key_" NAME_LOWER "_id", \
+                +[](void*, MTypeContext* c, const MTypeValue* const*, int) -> MTypeValue* { \
+                    return g_host->makeInt(c, static_cast<int64_t>(IMKEY)); })
+        REG_KEY("escape",     ImGuiKey_Escape);
+        REG_KEY("space",      ImGuiKey_Space);
+        REG_KEY("enter",      ImGuiKey_Enter);
+        REG_KEY("tab",        ImGuiKey_Tab);
+        REG_KEY("backspace",  ImGuiKey_Backspace);
+        REG_KEY("delete",     ImGuiKey_Delete);
+        REG_KEY("insert",     ImGuiKey_Insert);
+        REG_KEY("home",       ImGuiKey_Home);
+        REG_KEY("end",        ImGuiKey_End);
+        REG_KEY("page_up",    ImGuiKey_PageUp);
+        REG_KEY("page_down",  ImGuiKey_PageDown);
+        REG_KEY("left",       ImGuiKey_LeftArrow);
+        REG_KEY("right",      ImGuiKey_RightArrow);
+        REG_KEY("up",         ImGuiKey_UpArrow);
+        REG_KEY("down",       ImGuiKey_DownArrow);
+        REG_KEY("left_ctrl",  ImGuiKey_LeftCtrl);
+        REG_KEY("left_shift", ImGuiKey_LeftShift);
+        REG_KEY("left_alt",   ImGuiKey_LeftAlt);
+        REG_KEY("left_super", ImGuiKey_LeftSuper);
+        REG_KEY("right_ctrl", ImGuiKey_RightCtrl);
+        REG_KEY("right_shift",ImGuiKey_RightShift);
+        REG_KEY("right_alt",  ImGuiKey_RightAlt);
+        REG_KEY("right_super",ImGuiKey_RightSuper);
+        REG_KEY("a", ImGuiKey_A); REG_KEY("b", ImGuiKey_B); REG_KEY("c", ImGuiKey_C);
+        REG_KEY("d", ImGuiKey_D); REG_KEY("e", ImGuiKey_E); REG_KEY("f", ImGuiKey_F);
+        REG_KEY("g", ImGuiKey_G); REG_KEY("h", ImGuiKey_H); REG_KEY("i", ImGuiKey_I);
+        REG_KEY("j", ImGuiKey_J); REG_KEY("k", ImGuiKey_K); REG_KEY("l", ImGuiKey_L);
+        REG_KEY("m", ImGuiKey_M); REG_KEY("n", ImGuiKey_N); REG_KEY("o", ImGuiKey_O);
+        REG_KEY("p", ImGuiKey_P); REG_KEY("q", ImGuiKey_Q); REG_KEY("r", ImGuiKey_R);
+        REG_KEY("s", ImGuiKey_S); REG_KEY("t", ImGuiKey_T); REG_KEY("u", ImGuiKey_U);
+        REG_KEY("v", ImGuiKey_V); REG_KEY("w", ImGuiKey_W); REG_KEY("x", ImGuiKey_X);
+        REG_KEY("y", ImGuiKey_Y); REG_KEY("z", ImGuiKey_Z);
+        REG_KEY("f1",  ImGuiKey_F1);  REG_KEY("f2",  ImGuiKey_F2);
+        REG_KEY("f3",  ImGuiKey_F3);  REG_KEY("f4",  ImGuiKey_F4);
+        REG_KEY("f5",  ImGuiKey_F5);  REG_KEY("f6",  ImGuiKey_F6);
+        REG_KEY("f7",  ImGuiKey_F7);  REG_KEY("f8",  ImGuiKey_F8);
+        REG_KEY("f9",  ImGuiKey_F9);  REG_KEY("f10", ImGuiKey_F10);
+        REG_KEY("f11", ImGuiKey_F11); REG_KEY("f12", ImGuiKey_F12);
+        #undef REG_KEY
+
+        /* Phase 7-B — menus */
+        reg("__native__imgui_begin_main_menu_bar",   &nImGuiBeginMainMenuBar);
+        reg("__native__imgui_end_main_menu_bar",     &nImGuiEndMainMenuBar);
+        reg("__native__imgui_begin_menu_bar_window", &nImGuiBeginMenuBarWindow);
+        reg("__native__imgui_begin_menu_bar",        &nImGuiBeginMenuBar);
+        reg("__native__imgui_end_menu_bar",          &nImGuiEndMenuBar);
+        reg("__native__imgui_begin_menu",            &nImGuiBeginMenu);
+        reg("__native__imgui_end_menu",              &nImGuiEndMenu);
+        reg("__native__imgui_menu_item",             &nImGuiMenuItem);
+        reg("__native__imgui_menu_item_check",       &nImGuiMenuItemCheck);
+
+        /* Phase 7-B — tooltips */
+        reg("__native__imgui_set_tooltip",   &nImGuiSetTooltip);
+        reg("__native__imgui_begin_tooltip", &nImGuiBeginTooltip);
+        reg("__native__imgui_end_tooltip",   &nImGuiEndTooltip);
+
+        /* Phase 7-B — text variants */
+        reg("__native__imgui_text_colored",  &nImGuiTextColored);
+        reg("__native__imgui_text_wrapped",  &nImGuiTextWrapped);
+        reg("__native__imgui_text_disabled", &nImGuiTextDisabled);
+        reg("__native__imgui_label_text",    &nImGuiLabelText);
+
+        /* Phase 7-B — trees */
+        reg("__native__imgui_tree_node",          &nImGuiTreeNode);
+        reg("__native__imgui_tree_pop",           &nImGuiTreePop);
+        reg("__native__imgui_collapsing_header",  &nImGuiCollapsingHeader);
+        reg("__native__imgui_selectable",         &nImGuiSelectable);
+
+        /* Phase 7-B — numeric inputs */
+        reg("__native__imgui_input_float",          &nImGuiInputFloat);
+        reg("__native__imgui_input_int",            &nImGuiInputInt);
+        reg("__native__imgui_drag_float",           &nImGuiDragFloat);
+        reg("__native__imgui_drag_int",             &nImGuiDragInt);
+        reg("__native__imgui_input_text_multiline", &nImGuiInputTextMultiline);
+
+        /* Phase 7-B — layout precision */
+        reg("__native__imgui_begin_group",    &nImGuiBeginGroup);
+        reg("__native__imgui_end_group",      &nImGuiEndGroup);
+        reg("__native__imgui_indent",         &nImGuiIndent);
+        reg("__native__imgui_unindent",       &nImGuiUnindent);
+        reg("__native__imgui_get_cursor_pos", &nImGuiGetCursorPos);
+        reg("__native__imgui_set_cursor_pos", &nImGuiSetCursorPos);
+        reg("__native__imgui_dummy",          &nImGuiDummy);
     }
 }

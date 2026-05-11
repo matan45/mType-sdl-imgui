@@ -295,9 +295,240 @@ class ImGui {
     public static function popStyleVar(int count): void {
         __native__imgui_pop_style_var(count);
     }
+
+    // ------------------------------------------------------------------
+    // Phase 7-A — interactivity queries.
+    //
+    // Item-* queries read state for the previously-submitted widget.
+    // Window-* read state for the current window. Mouse buttons:
+    // 0=left, 1=right, 2=middle. Key constants: use the ImGuiKey class.
+    // ------------------------------------------------------------------
+
+    public static function isItemHovered():   bool { return __native__imgui_is_item_hovered(); }
+    public static function isItemActive():    bool { return __native__imgui_is_item_active(); }
+    public static function isItemFocused():   bool { return __native__imgui_is_item_focused(); }
+    public static function isItemClicked():   bool { return __native__imgui_is_item_clicked(); }
+    public static function isItemEdited():    bool { return __native__imgui_is_item_edited(); }
+    public static function isWindowHovered(): bool { return __native__imgui_is_window_hovered(); }
+    public static function isWindowFocused(): bool { return __native__imgui_is_window_focused(); }
+
+    public static function getWindowSize(): float[] { return __native__imgui_get_window_size(); }
+    public static function getWindowPos():  float[] { return __native__imgui_get_window_pos(); }
+    public static function getMousePos():   float[] { return __native__imgui_get_mouse_pos(); }
+
+    public static function isMouseClicked(int button): bool {
+        return __native__imgui_is_mouse_clicked(button);
+    }
+    public static function isMouseDown(int button): bool {
+        return __native__imgui_is_mouse_down(button);
+    }
+    public static function isKeyPressed(int keyId): bool {
+        return __native__imgui_is_key_pressed(keyId);
+    }
+    public static function isKeyDown(int keyId): bool {
+        return __native__imgui_is_key_down(keyId);
+    }
+
+    // ID stack — every list rendering widgets with the same label must
+    // wrap each item in pushID(uniqueValue) / popID(). Strings or ints
+    // both work; both feed into ImGui's same internal hash.
+    public static function pushID(string id):   void { __native__imgui_push_id_str(id); }
+    public static function pushIDInt(int id):   void { __native__imgui_push_id_int(id); }
+    public static function popID(): void { __native__imgui_pop_id(); }
+
+    // Progress bar. fraction in [0,1]. Pass width<0 or height<0 to
+    // auto-size on that axis. overlay="" suppresses the centered label.
+    public static function progressBar(float fraction, float width, float height,
+                                        string overlay): void {
+        __native__imgui_progress_bar(fraction, width, height, overlay);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 7-B — menus, tooltips, trees, text variants, numeric inputs,
+    // layout precision.
+    //
+    // Main menu bars are top-level (no Begin needed). In-window menu
+    // bars require the window to carry the MenuBar flag — open such a
+    // window with beginMenuBarWindow() instead of begin().
+    // ------------------------------------------------------------------
+
+    // --- menus ---
+    public static function beginMainMenuBar(): bool {
+        return __native__imgui_begin_main_menu_bar();
+    }
+    public static function endMainMenuBar(): void { __native__imgui_end_main_menu_bar(); }
+
+    public static function beginMenuBarWindow(string title): bool {
+        return __native__imgui_begin_menu_bar_window(title);
+    }
+    public static function beginMenuBar(): bool { return __native__imgui_begin_menu_bar(); }
+    public static function endMenuBar():   void { __native__imgui_end_menu_bar(); }
+
+    public static function beginMenu(string label): bool {
+        return __native__imgui_begin_menu(label);
+    }
+    public static function endMenu(): void { __native__imgui_end_menu(); }
+
+    // Returns true on the frame the user clicks. Pass "" as shortcut to
+    // hide it.
+    public static function menuItem(string label, string shortcut): bool {
+        return __native__imgui_menu_item(label, shortcut);
+    }
+
+    // Returns bool[2] = [clickedThisFrame, newChecked]. Same shape as
+    // beginClosable / beginPopupModal.
+    public static function menuItemCheck(string label, string shortcut, bool current): bool[] {
+        return __native__imgui_menu_item_check(label, shortcut, current);
+    }
+
+    // --- tooltips ---
+    // setTooltip is the one-shot helper: call right after the widget you
+    // want the tooltip to attach to. Pair with isItemHovered() to gate it.
+    public static function setTooltip(string text): void {
+        __native__imgui_set_tooltip(text);
+    }
+    // beginTooltip / endTooltip for multi-line / multi-widget tooltips.
+    public static function beginTooltip(): bool { return __native__imgui_begin_tooltip(); }
+    public static function endTooltip():   void { __native__imgui_end_tooltip(); }
+
+    // --- text variants ---
+    public static function textColored(float r, float g, float b, float a, string text): void {
+        __native__imgui_text_colored(r, g, b, a, text);
+    }
+    public static function textWrapped(string text):  void { __native__imgui_text_wrapped(text); }
+    public static function textDisabled(string text): void { __native__imgui_text_disabled(text); }
+    public static function labelText(string label, string text): void {
+        __native__imgui_label_text(label, text);
+    }
+
+    // --- trees ---
+    // treeNode returns true while the node is expanded — when true, draw
+    // children, then call treePop(). collapsingHeader is similar but
+    // self-renders its caret; no Pop needed.
+    public static function treeNode(string label): bool {
+        return __native__imgui_tree_node(label);
+    }
+    public static function treePop(): void { __native__imgui_tree_pop(); }
+    public static function collapsingHeader(string label): bool {
+        return __native__imgui_collapsing_header(label);
+    }
+    // Selectable returns true on the frame it was clicked. Pass the
+    // current selection state in `isSelected` to draw the highlight.
+    public static function selectable(string label, bool isSelected): bool {
+        return __native__imgui_selectable(label, isSelected);
+    }
+
+    // --- numeric inputs ---
+    public static function inputFloat(string label, float current): float {
+        return __native__imgui_input_float(label, current);
+    }
+    public static function inputInt(string label, int current): int {
+        return __native__imgui_input_int(label, current);
+    }
+    public static function dragFloat(string label, float current, float speed): float {
+        return __native__imgui_drag_float(label, current, speed);
+    }
+    public static function dragInt(string label, int current, float speed): int {
+        return __native__imgui_drag_int(label, current, speed);
+    }
+    public static function inputTextMultiline(string label, string current, int maxCapacity,
+                                                float width, float height): string {
+        return __native__imgui_input_text_multiline(label, current, maxCapacity, width, height);
+    }
+
+    // --- layout precision ---
+    public static function beginGroup(): void { __native__imgui_begin_group(); }
+    public static function endGroup():   void { __native__imgui_end_group(); }
+    public static function indent(float width):   void { __native__imgui_indent(width); }
+    public static function unindent(float width): void { __native__imgui_unindent(width); }
+    public static function getCursorPos(): float[] { return __native__imgui_get_cursor_pos(); }
+    public static function setCursorPos(float x, float y): void {
+        __native__imgui_set_cursor_pos(x, y);
+    }
+    // Reserves a rectangle of empty space to occupy layout for the next
+    // widget. Useful for fine-tuning vertical alignment.
+    public static function dummy(float width, float height): void {
+        __native__imgui_dummy(width, height);
+    }
 }
 
 class Font {
     public int handle;
     public constructor(int h) { this.handle = h; }
+}
+
+// ----------------------------------------------------------------------
+// Phase 7-A — ImGuiKey constant getters.
+//
+// ImGui has its own key enumeration distinct from SDL scancodes. Pass
+// the int returned by these methods to ImGui::isKeyPressed / isKeyDown.
+// Resolved once on the plugin side, so the call cost is one int read.
+// ----------------------------------------------------------------------
+
+class ImGuiKey {
+    public static function escape():     int { return __native__imgui_key_escape_id(); }
+    public static function space():      int { return __native__imgui_key_space_id(); }
+    public static function enter():      int { return __native__imgui_key_enter_id(); }
+    public static function tab():        int { return __native__imgui_key_tab_id(); }
+    public static function backspace():  int { return __native__imgui_key_backspace_id(); }
+    public static function delete_():    int { return __native__imgui_key_delete_id(); }
+    public static function insert():     int { return __native__imgui_key_insert_id(); }
+    public static function home():       int { return __native__imgui_key_home_id(); }
+    public static function end_():       int { return __native__imgui_key_end_id(); }
+    public static function pageUp():     int { return __native__imgui_key_page_up_id(); }
+    public static function pageDown():   int { return __native__imgui_key_page_down_id(); }
+
+    public static function left():       int { return __native__imgui_key_left_id(); }
+    public static function right():      int { return __native__imgui_key_right_id(); }
+    public static function up():         int { return __native__imgui_key_up_id(); }
+    public static function down():       int { return __native__imgui_key_down_id(); }
+
+    public static function leftCtrl():   int { return __native__imgui_key_left_ctrl_id(); }
+    public static function leftShift():  int { return __native__imgui_key_left_shift_id(); }
+    public static function leftAlt():    int { return __native__imgui_key_left_alt_id(); }
+    public static function leftSuper():  int { return __native__imgui_key_left_super_id(); }
+    public static function rightCtrl():  int { return __native__imgui_key_right_ctrl_id(); }
+    public static function rightShift(): int { return __native__imgui_key_right_shift_id(); }
+    public static function rightAlt():   int { return __native__imgui_key_right_alt_id(); }
+    public static function rightSuper(): int { return __native__imgui_key_right_super_id(); }
+
+    public static function a(): int { return __native__imgui_key_a_id(); }
+    public static function b(): int { return __native__imgui_key_b_id(); }
+    public static function c(): int { return __native__imgui_key_c_id(); }
+    public static function d(): int { return __native__imgui_key_d_id(); }
+    public static function e(): int { return __native__imgui_key_e_id(); }
+    public static function f(): int { return __native__imgui_key_f_id(); }
+    public static function g(): int { return __native__imgui_key_g_id(); }
+    public static function h(): int { return __native__imgui_key_h_id(); }
+    public static function i(): int { return __native__imgui_key_i_id(); }
+    public static function j(): int { return __native__imgui_key_j_id(); }
+    public static function k(): int { return __native__imgui_key_k_id(); }
+    public static function l(): int { return __native__imgui_key_l_id(); }
+    public static function m(): int { return __native__imgui_key_m_id(); }
+    public static function n(): int { return __native__imgui_key_n_id(); }
+    public static function o(): int { return __native__imgui_key_o_id(); }
+    public static function p(): int { return __native__imgui_key_p_id(); }
+    public static function q(): int { return __native__imgui_key_q_id(); }
+    public static function r(): int { return __native__imgui_key_r_id(); }
+    public static function s(): int { return __native__imgui_key_s_id(); }
+    public static function t(): int { return __native__imgui_key_t_id(); }
+    public static function u(): int { return __native__imgui_key_u_id(); }
+    public static function v(): int { return __native__imgui_key_v_id(); }
+    public static function w(): int { return __native__imgui_key_w_id(); }
+    public static function x(): int { return __native__imgui_key_x_id(); }
+    public static function y(): int { return __native__imgui_key_y_id(); }
+    public static function z(): int { return __native__imgui_key_z_id(); }
+
+    public static function f1():  int { return __native__imgui_key_f1_id(); }
+    public static function f2():  int { return __native__imgui_key_f2_id(); }
+    public static function f3():  int { return __native__imgui_key_f3_id(); }
+    public static function f4():  int { return __native__imgui_key_f4_id(); }
+    public static function f5():  int { return __native__imgui_key_f5_id(); }
+    public static function f6():  int { return __native__imgui_key_f6_id(); }
+    public static function f7():  int { return __native__imgui_key_f7_id(); }
+    public static function f8():  int { return __native__imgui_key_f8_id(); }
+    public static function f9():  int { return __native__imgui_key_f9_id(); }
+    public static function f10(): int { return __native__imgui_key_f10_id(); }
+    public static function f11(): int { return __native__imgui_key_f11_id(); }
+    public static function f12(): int { return __native__imgui_key_f12_id(); }
 }

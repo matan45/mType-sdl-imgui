@@ -19,6 +19,7 @@
  */
 
 #include "PluginGlobals.hpp"
+#include "BindingHelpers.hpp"
 
 #include <SDL3/SDL.h>
 #include "stb_image.h"
@@ -31,24 +32,15 @@ namespace sdlimgui
 {
     namespace
     {
-        bool requireArgs(MTypeContext* ctx, int argc, int expected, const char* name)
-        {
-            if (argc != expected) {
-                std::string m = std::string(name) + ": expected " + std::to_string(expected)
-                              + " args, got " + std::to_string(argc);
-                g_host->raiseError(ctx, "SdlError", m.c_str());
-                return false;
-            }
-            return true;
-        }
+        constexpr const char* kEx = "SdlError";
 
-        const char* getStr(const MTypeValue* v, size_t* outLen = nullptr)
+        inline bool requireArgs(MTypeContext* ctx, int argc, int expected, const char* name)
         {
-            if (g_host->getTag(v) != MT_TAG_STRING) {
-                if (outLen) *outLen = 0;
-                return "";
-            }
-            return g_host->getString(v, outLen);
+            return detail::requireArgs(ctx, argc, expected, name, kEx);
+        }
+        inline const char* getStr(const MTypeValue* v, size_t* outLen = nullptr)
+        {
+            return detail::getStr(v, outLen);
         }
 
         /* ---------------------------------------------------------------- */
@@ -624,6 +616,225 @@ namespace sdlimgui
                     static_cast<Uint16>(std::clamp(high, 0, 0xFFFF)),
                     static_cast<Uint32>(dur)) ? 1 : 0);
         }
+
+        /* ----------------------------------------------------------------
+         * Phase 7-C: realtime input, timing, window props, render primitives.
+         * ---------------------------------------------------------------- */
+
+        /* Mouse state: returns float[3] = [x, y, buttonsBitmask]. SDL's
+         * button mask uses SDL_BUTTON_MASK(n) = 1u << (n-1): left=1,
+         * middle=2, right=4 (note: SDL3 numbers left=1, middle=2, right=3
+         * — different ordering than SDL2). */
+        MTypeValue* nSdlGetMouseState(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            float x = 0.0f, y = 0.0f;
+            SDL_MouseButtonFlags buttons = SDL_GetMouseState(&x, &y);
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_FLOAT, 3);
+            g_host->arraySet(out, 0, g_host->makeFloat(ctx, x));
+            g_host->arraySet(out, 1, g_host->makeFloat(ctx, y));
+            g_host->arraySet(out, 2, g_host->makeFloat(ctx, static_cast<double>(buttons)));
+            return out;
+        }
+
+        MTypeValue* nSdlIsScancodeDown(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_is_scancode_down")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            int sc = static_cast<int>(g_host->getInt(args[0]));
+            int numkeys = 0;
+            const bool* state = SDL_GetKeyboardState(&numkeys);
+            if (!state || sc < 0 || sc >= numkeys) {
+                return g_host->makeBool(ctx, 0);
+            }
+            return g_host->makeBool(ctx, state[sc] ? 1 : 0);
+        }
+
+        /* Timing. SDL3 uses Uint64 for both ticks (ms since SDL_Init) and
+         * the perf counter; we cast to int64 (mType has no uint64). */
+        MTypeValue* nSdlGetTicks(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_GetTicks()));
+        }
+        MTypeValue* nSdlGetPerformanceCounter(void*, MTypeContext* ctx,
+                                                const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_GetPerformanceCounter()));
+        }
+        MTypeValue* nSdlGetPerformanceFrequency(void*, MTypeContext* ctx,
+                                                  const MTypeValue* const*, int)
+        {
+            return g_host->makeInt(ctx, static_cast<int64_t>(SDL_GetPerformanceFrequency()));
+        }
+
+        /* Window props. */
+        MTypeValue* nSdlGetWindowSize(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 1, "__native__sdl_get_window_size")) {
+                return g_host->makeNull(ctx);
+            }
+            SDL_Window* w = g_windows.find(g_host->getInt(args[0]));
+            int ww = 0, hh = 0;
+            if (w) SDL_GetWindowSize(w, &ww, &hh);
+            MTypeValue* out = g_host->makeArray(ctx, MT_TAG_INT, 2);
+            g_host->arraySet(out, 0, g_host->makeInt(ctx, ww));
+            g_host->arraySet(out, 1, g_host->makeInt(ctx, hh));
+            return out;
+        }
+        MTypeValue* nSdlSetWindowSize(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__sdl_set_window_size")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Window* w = g_windows.find(g_host->getInt(args[0]));
+            if (!w) return g_host->makeVoid(ctx);
+            SDL_SetWindowSize(w,
+                static_cast<int>(g_host->getInt(args[1])),
+                static_cast<int>(g_host->getInt(args[2])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlSetWindowTitle(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__sdl_set_window_title")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Window* w = g_windows.find(g_host->getInt(args[0]));
+            if (!w) return g_host->makeVoid(ctx);
+            SDL_SetWindowTitle(w, getStr(args[1]));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlSetWindowFullscreen(void*, MTypeContext* ctx,
+                                              const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 2, "__native__sdl_set_window_fullscreen")) {
+                return g_host->makeBool(ctx, 0);
+            }
+            SDL_Window* w = g_windows.find(g_host->getInt(args[0]));
+            if (!w) return g_host->makeBool(ctx, 0);
+            bool full = g_host->getBool(args[1]) != 0;
+            return g_host->makeBool(ctx, SDL_SetWindowFullscreen(w, full) ? 1 : 0);
+        }
+        MTypeValue* nSdlShowCursor(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            SDL_ShowCursor();
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlHideCursor(void*, MTypeContext* ctx, const MTypeValue* const*, int)
+        {
+            SDL_HideCursor();
+            return g_host->makeVoid(ctx);
+        }
+
+        /* Renderer primitives. All coordinates are floats in SDL3. */
+        MTypeValue* nSdlRenderLine(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__sdl_render_line")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            if (!r) return g_host->makeVoid(ctx);
+            SDL_RenderLine(r,
+                static_cast<float>(g_host->getFloat(args[1])),
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+                static_cast<float>(g_host->getFloat(args[4])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlRenderRect(void*, MTypeContext* ctx,
+                                     const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__sdl_render_rect")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            if (!r) return g_host->makeVoid(ctx);
+            SDL_FRect rc {
+                static_cast<float>(g_host->getFloat(args[1])),
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+                static_cast<float>(g_host->getFloat(args[4])),
+            };
+            SDL_RenderRect(r, &rc);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlRenderFillRect(void*, MTypeContext* ctx,
+                                         const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 5, "__native__sdl_render_fill_rect")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            if (!r) return g_host->makeVoid(ctx);
+            SDL_FRect rc {
+                static_cast<float>(g_host->getFloat(args[1])),
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+                static_cast<float>(g_host->getFloat(args[4])),
+            };
+            SDL_RenderFillRect(r, &rc);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlRenderPoint(void*, MTypeContext* ctx,
+                                      const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 3, "__native__sdl_render_point")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            if (!r) return g_host->makeVoid(ctx);
+            SDL_RenderPoint(r,
+                static_cast<float>(g_host->getFloat(args[1])),
+                static_cast<float>(g_host->getFloat(args[2])));
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlRenderTexture(void*, MTypeContext* ctx,
+                                        const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 6, "__native__sdl_render_texture")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            SDL_Texture* t  = g_textures.find(g_host->getInt(args[1]));
+            if (!r || !t) return g_host->makeVoid(ctx);
+            SDL_FRect dst {
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+                static_cast<float>(g_host->getFloat(args[4])),
+                static_cast<float>(g_host->getFloat(args[5])),
+            };
+            SDL_RenderTexture(r, t, nullptr, &dst);
+            return g_host->makeVoid(ctx);
+        }
+        MTypeValue* nSdlRenderTextureRotated(void*, MTypeContext* ctx,
+                                               const MTypeValue* const* args, int argc)
+        {
+            if (!requireArgs(ctx, argc, 10, "__native__sdl_render_texture_rotated")) {
+                return g_host->makeVoid(ctx);
+            }
+            SDL_Renderer* r = g_renderers.find(g_host->getInt(args[0]));
+            SDL_Texture* t  = g_textures.find(g_host->getInt(args[1]));
+            if (!r || !t) return g_host->makeVoid(ctx);
+            SDL_FRect dst {
+                static_cast<float>(g_host->getFloat(args[2])),
+                static_cast<float>(g_host->getFloat(args[3])),
+                static_cast<float>(g_host->getFloat(args[4])),
+                static_cast<float>(g_host->getFloat(args[5])),
+            };
+            double angle = g_host->getFloat(args[6]);
+            SDL_FPoint center {
+                static_cast<float>(g_host->getFloat(args[7])),
+                static_cast<float>(g_host->getFloat(args[8])),
+            };
+            int flipFlags = static_cast<int>(g_host->getInt(args[9]));
+            SDL_FlipMode flip = static_cast<SDL_FlipMode>(flipFlags & 3);
+            SDL_RenderTextureRotated(r, t, nullptr, &dst, angle, &center, flip);
+            return g_host->makeVoid(ctx);
+        }
     }
 
     void registerSdlNatives(MTypeContext* ctx)
@@ -690,5 +901,30 @@ namespace sdlimgui
 
         /* Phase 5 — haptic */
         reg("__native__sdl_rumble_gamepad",        &nSdlRumbleGamepad);
+
+        /* Phase 7-C — realtime input */
+        reg("__native__sdl_get_mouse_state",       &nSdlGetMouseState);
+        reg("__native__sdl_is_scancode_down",      &nSdlIsScancodeDown);
+
+        /* Phase 7-C — timing */
+        reg("__native__sdl_get_ticks",                 &nSdlGetTicks);
+        reg("__native__sdl_get_performance_counter",   &nSdlGetPerformanceCounter);
+        reg("__native__sdl_get_performance_frequency", &nSdlGetPerformanceFrequency);
+
+        /* Phase 7-C — window props */
+        reg("__native__sdl_get_window_size",       &nSdlGetWindowSize);
+        reg("__native__sdl_set_window_size",       &nSdlSetWindowSize);
+        reg("__native__sdl_set_window_title",      &nSdlSetWindowTitle);
+        reg("__native__sdl_set_window_fullscreen", &nSdlSetWindowFullscreen);
+        reg("__native__sdl_show_cursor",           &nSdlShowCursor);
+        reg("__native__sdl_hide_cursor",           &nSdlHideCursor);
+
+        /* Phase 7-C — renderer primitives */
+        reg("__native__sdl_render_line",            &nSdlRenderLine);
+        reg("__native__sdl_render_rect",            &nSdlRenderRect);
+        reg("__native__sdl_render_fill_rect",       &nSdlRenderFillRect);
+        reg("__native__sdl_render_point",           &nSdlRenderPoint);
+        reg("__native__sdl_render_texture",         &nSdlRenderTexture);
+        reg("__native__sdl_render_texture_rotated", &nSdlRenderTextureRotated);
     }
 }

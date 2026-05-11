@@ -45,6 +45,7 @@ set(PLUGIN_SOURCES
     src/ImGuiBindings.cpp
     src/HandleRegistry.hpp
     src/PluginGlobals.hpp
+    src/BindingHelpers.hpp
 )
 
 add_library(mtype_sdl_imgui SHARED
